@@ -1,4 +1,4 @@
-## Capítulo 3. Enlace de modelos (ES2024 + ES Modules + Vite)
+# Capítulo 3. Enlace de modelos (ESNext + ES Modules + Vite)
 
 Mantener los modelos sincronizados con las vistas es clave para una UI coherente. En este capítulo migramos todos los ejemplos a ES Modules (ESM), plantillas externas importadas como texto (`?raw`) y ejecutándose en Vite. Usaremos las clases base del proyecto: `ModelView`, `CollectionView` y `Layout` ubicadas en `src/ui/common/`.
 
@@ -6,7 +6,7 @@ Mantener los modelos sincronizados con las vistas es clave para una UI coherente
 - Las plantillas se importan como texto y se compilan con `_.template` en tiempo de ejecución.
 - La inicialización de controles que tocan el DOM se hace en `onRender`/`onShow` (cuando el elemento ya está en el DOM real).
 
-### 1) Enlace manual: formulario y vista previa
+## Enlace manual: formulario y vista previa
 
 Estructura mínima del módulo:
 
@@ -491,3 +491,204 @@ _.extend(Backbone.Validation.callbacks, {
 ```
 
 En el próximo capítulo, modularizaremos la aplicación de contactos con ES Modules y gestionaremos dependencias con Vite. Veremos el flujo dev/build/preview y el empaquetado optimizado de Vite.
+
+---
+
+## 5) Sincronización con servidor (fetch, save, destroy)
+
+Backbone integra sincronización REST a través de `Backbone.sync`. Con ES Modules y Vite, puedes usar jQuery como backend AJAX (por defecto) o proveer `Backbone.ajax = window.fetch` con un adaptador. Usaremos los eventos `request/sync/error` para estados de UI.
+
+```js
+import Backbone from 'backbone';
+import $ from 'jquery';
+
+Backbone.$ = $; // si usas jQuery como backend de AJAX
+
+class Contact extends Backbone.Model {
+  get urlRoot() { return '/api/contacts'; }
+}
+
+class ContactCollection extends Backbone.Collection {
+  get model() { return Contact; }
+  get url() { return '/api/contacts'; }
+}
+
+// Fetch de un modelo
+const c = new Contact({ id: 10 });
+c.on('request', () => view.setLoading?.(true));
+c.on('sync', () => view.setLoading?.(false));
+c.on('error', (_m, xhr) => view.setError?.(xhr?.responseText || 'Error'));
+c.fetch();
+
+// Guardar con PATCH (parcial) o PUT (completo)
+c.save({ phone: '999-999' }, { patch: true }); // PATCH /api/contacts/10
+
+// Crear en colección
+const col = new ContactCollection();
+col.fetch({ reset: true }); // GET /api/contacts
+col.create({ name: 'Jane' }, { wait: true }); // POST y agrega tras éxito
+
+// Eliminar
+c.destroy({ wait: true }); // DELETE /api/contacts/10
+```
+
+Opciones útiles:
+
+- `wait: true`: difiere mutación local hasta confirmación del servidor.
+- `patch: true`: envía solo atributos cambiados (PATCH).
+- `emulateHTTP / emulateJSON`: compatibilidad con APIs legacy.
+
+## 6) Estados de red y UI (request/sync/error)
+
+Integra estados de red con tus vistas (p. ej., `StatefulCollectionView`).
+
+```js
+// En una vista que muestra una colección
+this.listenTo(this.collection, 'request', () => this.setLoading(true));
+this.listenTo(this.collection, 'sync', () => this.setLoading(false));
+this.listenTo(this.collection, 'error', (_c, xhr) => this.setError(xhr?.statusText || 'Error'));
+
+// Paginación via query params
+this.collection.fetch({ reset: true, data: { page: 1, size: 20 } });
+```
+
+## 7) `parse` de modelo/colección y metadatos
+
+Usa `parse` para adaptar payloads `{ data, meta }` sin ensuciar tu lógica de UI.
+
+```js
+class Contacts extends Backbone.Collection {
+  get url() { return '/api/contacts'; }
+  parse(resp) {
+    this.total = resp.meta?.total;
+    return resp.data; // devuelve array de modelos
+  }
+}
+
+class Contact extends Backbone.Model {
+  parse(attrs) {
+    // normaliza atributos al entrar
+    if (attrs.full_name && !attrs.name) attrs.name = attrs.full_name;
+    return attrs;
+  }
+}
+```
+
+## 8) UI optimista y rollback
+
+Dos estrategias comunes:
+
+- __Optimista__: agrega primero, revierte si falla.
+
+```js
+  const m = new Contact({ name: 'Temp' });
+  col.add(m);
+  m.save(null, {
+    error: () => col.remove(m), // rollback
+  });
+```
+
+- __Con `wait: true`__: agrega tras éxito.
+
+```js
+  col.create({ name: 'Jane' }, { wait: true });
+```
+
+Para updates, muestra estado deshabilitado/spinner en el ítem y restaura si hay `error`.
+
+## 9) Proxy de desarrollo en Vite (evitar CORS)
+
+Configura un proxy para `/api` en `vite.config.ts`.
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
+});
+```
+
+## 10) Manejo de errores estandarizado
+
+Centraliza el mapeo de códigos HTTP a mensajes y validaciones.
+
+```js
+function handleHttpError(xhr, { onValidation, onAuth, onGeneric }) {
+  const status = xhr?.status;
+  if (status === 400 && xhr.responseJSON?.errors) return onValidation?.(xhr.responseJSON.errors);
+  if (status === 401) return onAuth?.();
+  return onGeneric?.(xhr?.statusText || 'Unexpected error');
+}
+```
+
+En `invalid` o en `error` invoca tu `ValidationUIHandler` para reflejar errores en el formulario.
+
+## 11) Pruebas de sincronización (Vitest + MSW)
+
+Usa [MSW](https://mswjs.io/) para interceptar peticiones de `fetch`/XHR en pruebas.
+
+```ts
+// tests/setup/msw.ts
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
+
+export const server = setupServer(
+  rest.get('/api/contacts', (_req, res, ctx) => res(
+    ctx.json({ data: [{ id: 1, name: 'A' }], meta: { total: 1 } })
+  )),
+  rest.post('/api/contacts', async (req, res, ctx) => {
+    const body = await req.json();
+    return res(ctx.status(201), ctx.json({ id: 2, ...body }));
+  })
+);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+```
+
+```js
+// tests/contacts/sync.spec.js
+import { describe, it, expect, beforeEach } from 'vitest';
+import Backbone from 'backbone';
+
+class Contact extends Backbone.Model { get urlRoot() { return '/api/contacts'; } }
+class Contacts extends Backbone.Collection {
+  get model() { return Contact; }
+  get url() { return '/api/contacts'; }
+  parse(r) { this.total = r.meta.total; return r.data; }
+}
+
+describe('sync', () => {
+  let col;
+  beforeEach(() => { col = new Contacts(); });
+
+  it('fetch popula colección y meta', async () => {
+    await col.fetch({ reset: true });
+    expect(col.length).toBe(1);
+    expect(col.total).toBe(1);
+  });
+
+  it('create con wait:true agrega tras éxito', async () => {
+    const m = await col.create({ name: 'B' }, { wait: true });
+    expect(m.id).toBe(2);
+    expect(col.get(2)).toBeTruthy();
+  });
+});
+```
+
+---
+
+### Conclusiones del capítulo 3
+
+- Sincroniza modelos/colecciones con REST usando `fetch/save/destroy` y eventos `request/sync/error` para estados de UI.
+- Usa `parse` para adaptar payloads y `wait/patch` para controlar mutaciones y payloads parciales.
+- Configura proxy en Vite para un DX fluido y tests con MSW para endpoints REST.

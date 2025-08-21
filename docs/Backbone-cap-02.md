@@ -1,8 +1,8 @@
-## Capítulo 2. Gestión de vistas (ESM + Vite)
+# Capítulo 2. Gestión de vistas (ESM + Vite)
 
 Como hemos visto en el capítulo anterior, las vistas Backbone son responsables de gestionar las interacciones DOM (Document Object Model) entre usuarios y aplicaciones. Una aplicación Backbone típica se compone de muchas vistas con un comportamiento muy específico; por ejemplo, podemos tener una vista para mostrar datos de contacto y otra vista para editarlos. Renderizar una única vista es trivial, pero orquestar un diseño complejo con múltiples vistas puede ser complicado.
 
-En este capítulo modernizamos los ejemplos a ES Modules (ES2024) y un flujo con Vite. Usaremos:
+En este capítulo modernizamos los ejemplos a ES Modules (ESNext) y un flujo con Vite. Usaremos:
 
 - Imports ESM (`import/export`).
 - Plantillas como archivos `.tpl` o `.hbs` importadas con `?raw` y compiladas con `_.template`.
@@ -17,7 +17,7 @@ En este capítulo aprenderá a:
 
 ---
 
-### Identificar tipos de vistas
+## Identificar tipos de vistas
 
 Después de trabajar un tiempo con Backbone se observan casos de uso comunes para las vistas. Definiremos un conjunto reutilizable y modular:
 
@@ -488,6 +488,282 @@ export class ContactForm extends ModelView {
 ```
 
 Si usa `CollectionView`, su `onShow()` propaga la llamada a las vistas hijas.
+
+---
+
+### Ciclo de vida y limpieza avanzada
+
+Para evitar fugas de memoria y manejadores de eventos, estandarice la destrucción de vistas.
+
+```js
+// src/ui/common/SafeView.js
+import Backbone from 'backbone';
+
+export class SafeView extends Backbone.View {
+  remove() {
+    this.beforeRemove?.(); // Desuscribir timers, observers, listeners manuales
+    super.remove();        // Quita del DOM y hace stopListening()
+    this.$?.off?.();       // Si unió eventos jQuery manuales
+    this.afterRemove?.();
+    return this;
+  }
+}
+```
+
+- Use `listenTo` en lugar de `on` para autolimpieza.
+- En listas, cierre hijas (ver `CollectionView#closeChildren()`).
+- Para recursos externos (maps, pickers), libere en `beforeRemove()`.
+
+### Event bus / PubSub con Backbone.Events
+
+Desacople comunicación entre vistas/controladores con un bus global.
+
+```js
+// src/core/eventBus.js
+import { Events } from 'backbone';
+export const eventBus = {};
+Object.assign(eventBus, Events);
+```
+
+Uso:
+
+```js
+// Emisor
+import { eventBus } from '@/core/eventBus';
+eventBus.trigger('contacts:create');
+
+// Oyente
+eventBus.on('contacts:create', () => {
+  // navegar o abrir formulario
+});
+```
+
+### Estados de UI: loading / empty / error
+
+Gestione estados comunes para una mejor UX.
+
+```js
+// src/ui/common/StatefulCollectionView.js
+import { CollectionView } from '@/common/CollectionView';
+
+export class StatefulCollectionView extends CollectionView {
+  initialize() {
+    super.initialize();
+    this.loading = false; this.error = null;
+  }
+  setLoading(v) { this.loading = v; this.render(); }
+  setError(err) { this.error = err; this.render(); }
+  render() {
+    this.$el.empty();
+    if (this.loading) { this.$el.html('<div class="state loading">Loading…</div>'); return this; }
+    if (this.error)   { this.$el.html(`<div class="state error">${this.error}</div>`); return this; }
+    if (!this.collection?.length) { this.$el.html('<div class="state empty">No data</div>'); return this; }
+    return super.render();
+  }
+}
+```
+
+Integre con `collection.fetch()` para alternar estados (`request`, `sync`, `error`).
+
+### Renderizado eficiente
+
+- Combine `listenTo(model, 'change', ...)` con `_.debounce` si hay renders frecuentes.
+- Render de colecciones en lote: `DocumentFragment` + una sola inserción en DOM.
+- Para animaciones/pintados caros, use `requestAnimationFrame`.
+
+```js
+// Debounce de render
+this.listenTo(this.model, 'change', _.debounce(() => this.render(), 0));
+
+// Batching en CollectionView.render()
+const frag = document.createDocumentFragment();
+this.collection.each((m) => { const v = this.renderModel(m); frag.appendChild(v.el); });
+this.$el.empty().append(frag);
+
+// Programar trabajo pesado
+requestAnimationFrame(() => { /* medir, scroll, etc. */ });
+```
+
+### HMR con Vite (gotchas y buenas prácticas)
+
+- Plantillas `?raw` se recompilan al guardar; evite cache global.
+- Si mantiene vistas vivas durante HMR, acepte/disponibilice el módulo:
+
+```js
+let view;
+export function start() {
+  view = new RootLayout();
+  region.show(view);
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => view?.remove()); // liberar DOM y eventos
+}
+```
+
+---
+
+### Ejemplo end-to-end: Event Bus + Router + Región
+
+Conectemos la barra de acciones, el bus de eventos y el router para abrir el formulario en la región principal.
+
+```js
+// src/ui/modules/contacts/views/ContactListActionBar.js
+import { ModelView } from '@/common/ModelView';
+import { eventBus } from '@/core/eventBus';
+import tpl from '@/modules/contacts/templates/contact-list-action-bar.tpl?raw';
+
+export class ContactListActionBar extends ModelView {
+  constructor(options) { super(options); this.template = tpl; this.className = 'options-bar col-xs-12'; }
+  get events() { return { 'click button': 'createContact' }; }
+  createContact() { eventBus.trigger('contacts:create'); }
+}
+```
+
+```js
+// src/core/router.js
+import Backbone from 'backbone';
+import { Region } from '@/common/Region';
+import { ContactForm } from '@/modules/contacts/views/ContactForm';
+import { eventBus } from '@/core/eventBus';
+
+export class AppRouter extends Backbone.Router {
+  initialize() {
+    this.main = new Region({ el: '#main' });
+    // Navegar cuando la UI dispare la creación
+    this.listenTo(eventBus, 'contacts:create', () => this.navigate('contacts/new', { trigger: true }));
+  }
+  get routes() {
+    return { 'contacts/new': 'newContact' };
+  }
+  newContact() {
+    const form = new ContactForm({ model: new Backbone.Model() });
+    this.main.show(form);
+    this.listenTo(form, 'form:save', (model) => {
+      // TODO: persistir (collection.create / model.save)
+      this.navigate('contacts', { trigger: true });
+    });
+    this.listenTo(form, 'form:cancel', () => this.navigate('contacts', { trigger: true }));
+  }
+}
+```
+
+```js
+// src/app.js (punto de entrada)
+import Backbone from 'backbone';
+import { AppRouter } from '@/core/router';
+
+const router = new AppRouter();
+Backbone.history.start({ pushState: true });
+
+// HMR opcional
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    // liberar listeners del router
+    router.stopListening();
+  });
+}
+```
+
+Notas:
+
+- El `eventBus` desacopla la intención de la UI de la navegación.
+- La `Region` garantiza que al cambiar de pantalla se limpien vistas previas.
+- Puedes ampliar rutas para `contacts` (listado) reutilizando `ContactListLayout` + `ContactListView`.
+
+### Pruebas de vistas con Vitest y jsdom
+
+Config mín. de Vitest:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    alias: { '@': '/src/ui' },
+  },
+});
+```
+
+Prueba básica de `ModelView` renderizando una plantilla con datos del modelo:
+
+```js
+// tests/ui/ModelView.spec.js
+import { describe, it, expect } from 'vitest';
+import Backbone from 'backbone';
+import { ModelView } from '@/common/ModelView';
+
+describe('ModelView', () => {
+  it('renderiza template con datos del modelo', () => {
+    const M = Backbone.Model.extend({});
+    const model = new M({ name: 'Ada' });
+    class TestView extends ModelView {
+      constructor(options) {
+        super(options);
+        this.template = '<span id="n"><%= name %></span>';
+      }
+    }
+    const view = new TestView({ model });
+    view.render();
+    expect(view.$('#n').text()).toBe('Ada');
+  });
+});
+```
+
+Sugerencias rápidas:
+
+- Use `onShow()` para inicializar plugins dependientes del DOM real dentro de pruebas (monte la vista en un contenedor `document.body`).
+- Para `CollectionView`, verifique que se rendericen los ítems y que al hacer `remove/reset` se limpien (p. ej., `expect(container.querySelectorAll(...).length).toBe(0)`).
+
+#### Pruebas adicionales
+
+```js
+// tests/ui/CollectionView.spec.js
+import { describe, it, expect, beforeEach } from 'vitest';
+import Backbone from 'backbone';
+import { CollectionView } from '@/common/CollectionView';
+import { ModelView } from '@/common/ModelView';
+
+class ItemView extends ModelView {
+  constructor(o){ super(o); this.template = '<li class="it"><%= name %></li>'; }
+}
+
+class ListView extends CollectionView {
+  constructor(o){ super(o); this.modelView = ItemView; this.tagName = 'ul'; }
+}
+
+describe('CollectionView', () => {
+  let col, view;
+  beforeEach(() => { col = new Backbone.Collection([{name:'A'},{name:'B'}]); view = new ListView({ collection: col }); });
+  it('renderiza ítems y limpia al resetear', () => {
+    view.render();
+    expect(view.el.querySelectorAll('.it').length).toBe(2);
+    col.reset([]); // dispara render()
+    expect(view.el.querySelectorAll('.it').length).toBe(0);
+  });
+});
+```
+
+```js
+// tests/ui/Layout.spec.js
+import { describe, it, expect } from 'vitest';
+import { Layout } from '@/common/Layout';
+import { ModelView } from '@/common/ModelView';
+
+class TestLayout extends Layout {
+  constructor(o){ super(o); this.template = '<div id="a"></div><div id="b"></div>'; this.regions = { A:'#a', B:'#b' }; }
+}
+class Child extends ModelView { constructor(o){ super(o); this.template = '<span id="ok">ok</span>'; } onShow(){ this._shown = true; } }
+
+it('crea regiones y monta vistas llamando onShow', () => {
+  const layout = new TestLayout(); layout.render();
+  document.body.appendChild(layout.el); // simula DOM real
+  layout.getRegion('A').show(new Child());
+  expect(layout.$('#ok').length).toBe(1);
+});
+```
 
 ---
 

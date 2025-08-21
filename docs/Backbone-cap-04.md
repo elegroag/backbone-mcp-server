@@ -1,140 +1,352 @@
-## Capítulo 4. Código Modular
+# Capítulo 4. Código Modular
 
-A medida que el código de su proyecto crece, la cantidad de scripts en el proyecto será cada vez mayor, lo que aumentará la complejidad de la carga de scripts. La forma clásica de cargar archivos JavaScript es escribir <script>etiquetas para cada script que tenga, pero debe hacerlo en el orden correcto; Si no lo hace, su código podría dejar de funcionar. Esa no es una forma eficiente para proyectos de tamaño mediano.
+A medida que el código de su proyecto crece, la cantidad de scripts en el proyecto será cada vez mayor, lo que aumentará la complejidad de la carga de scripts. La forma clásica de cargar archivos JavaScript es escribir etiquetas `<script>` para cada script que tenga, pero debe hacerlo en el orden correcto. Si no lo hace, su código podría dejar de funcionar. Esa no es una forma eficiente para proyectos de tamaño mediano.
 
 ¿Qué pasa si olvidas el orden de carga? ¿Qué pasa si realizas una refactorización en el código y cambia el orden del script? Será complicado solucionarlo y realizar un seguimiento de todo el código y sus dependencias.
-Este problema se ha abordado de diferentes maneras. Una es crear una sintaxis de módulo para crear, cargar y declarar explícitamente las dependencias de los módulos; la sintaxis se llama AMD ( Definición de módulo asíncrono ). Los módulos AMD definen una lista de dependencias del módulo y el código dentro del módulo se ejecutará solo después de que las dependencias estén completamente cargadas.
-Las dependencias se cargan de forma asincrónica; eso significa que no necesita cargar todos los scripts en la página HTML a través de <script> etiquetas. Los módulos AMD son mejores que JavaScript simple porque definen dependencias explícitamente y se pueden cargar automáticamente.
 
-Aunque los módulos AMD son mejores que <script>las etiquetas, trabajar con módulos AMD puede ser complicado cuando llegan las pruebas unitarias porque es necesario conocer las complejidades de cómo la biblioteca carga los módulos; Cuando desea realizar pruebas unitarias, necesita aislar las piezas de código bajo prueba, pero es difícil hacerlo en RequireJS, e incluso si lo hace, el resultado puede tener errores.
+Este problema se ha abordado de diferentes maneras. Una es crear una sintaxis de módulo para crear, cargar y declarar explícitamente las dependencias de los módulos; la sintaxis se llama AMD (Definición de módulo asíncrono). Los módulos AMD definen una lista de dependencias del módulo y el código dentro del módulo se ejecutará solo después de que las dependencias estén completamente cargadas.
 
-Recientemente llegó otro cargador de módulos y administrador de dependencias; Vite parece ser el más popular en este momento. Sin embargo, no es el único; Hay muchas otras opciones potencialmente sólidas, como jspm y Steal.js.
-En este libro, trabajaremos con Vite debido a su popularidad, por lo que puede encontrar mucha información y documentación al respecto en la Web; Otra buena razón es que se han construido muchos proyectos con él, lo que demuestra su madurez y que está listo para producción. Vite utiliza ES Modules para definir módulos y dependencias, de modo que si ya conoce Node puede ir directamente a la sección Vite.
+Las dependencias se cargan de forma asincrónica; eso significa que no necesita cargar todos los scripts en la página HTML a través de etiquetas `<script>`. Los módulos AMD son mejores que JavaScript simple porque definen dependencias explícitamente y se pueden cargar automáticamente.
 
-### Módulos: CommonJS vs ES Modules (ESM)
+Aunque los módulos AMD son mejores que las etiquetas `<script>`, trabajar con módulos AMD puede ser complicado cuando llegan las pruebas unitarias porque es necesario conocer las complejidades de cómo la biblioteca carga los módulos. Cuando desea realizar pruebas unitarias, necesita aislar las piezas de código bajo prueba, pero es difícil hacerlo en RequireJS, e incluso si lo hace, el resultado puede tener errores.
 
-Nota: Node usa históricamente CommonJS (`require`/`module.exports`), pero en el navegador trabajaremos con ES Modules (`import`/`export`) mediante Vite. Cuando veas ejemplos CommonJS, puedes traducirlos a su equivalente ESM.
+Recientemente llegó otro cargador de módulos y administrador de dependencias; Vite parece ser el más popular en este momento. Sin embargo, no es el único; hay muchas otras opciones potencialmente sólidas, como jspm y Steal.js.
 
-En los últimos años, Node ha ido ganando popularidad en la industria del software; de hecho se está volviendo muy popular elección para el desarrollo backend en una pila de tecnología JavaScript completa. Si no conoce Node, puede considerarse como JavaScript utilizado en el servidor en lugar de un navegador.
+En este libro, trabajaremos con Vite debido a su popularidad, por lo que puede encontrar mucha información y documentación al respecto en la Web. Otra buena razón es que se han construido muchos proyectos con él, lo que demuestra su madurez y que está listo para producción. Vite utiliza ES Modules para definir módulos y dependencias, de modo que si ya conoce Node puede ir directamente a la sección Vite.
+
+## Módulos: CommonJS vs ES Modules (ESM)
+
+**Nota:** Node usa históricamente CommonJS (`require`/`module.exports`), pero en el navegador trabajaremos con ES Modules (`import`/`export`) mediante Vite. Cuando veas ejemplos CommonJS, puedes traducirlos a su equivalente ESM.
+
+En los últimos años, Node ha ido ganando popularidad en la industria del software; de hecho, se está volviendo una elección muy popular para el desarrollo backend en una pila de tecnología JavaScript completa. Si no conoce Node, puede considerarse como JavaScript utilizado en el servidor en lugar de un navegador.
+
 Node utiliza la sintaxis del módulo CommonJS para sus módulos; un módulo CommonJS es un archivo que exporta un valor único para usarlo en otros módulos. Es útil utilizar CommonJS porque proporciona una forma limpia de administrar módulos y dependencias de JavaScript.
 
-Para admitir CommonJS, Node utiliza el require() función. Con require()puedes cargar archivos JavaScript sin la necesidad de usar <script>etiquetas, en lugar de llamar require() con el nombre del módulo/dependencia que necesitas y asignarlo a una variable.
-Para ilustrar cómo funcionan los módulos CommonJS, escribamos un módulo Node y veamos cómo usar la require() función. El siguiente código muestra un módulo simple que expone un objeto simple con el método sayHello():
+Para admitir CommonJS, Node utiliza la función `require()`. Con `require()` puedes cargar archivos JavaScript sin la necesidad de usar etiquetas `<script>`. Simplemente llamas a `require()` con la ruta del módulo/dependencia que necesitas y asignas el resultado a una variable.
+
+Para ilustrar cómo funcionan los módulos CommonJS, escribamos un módulo Node y veamos cómo usar la función `require()`. El siguiente código muestra un módulo simple que expone un objeto con el método `sayHello()`:
 
 ```js
+// hello.js
 const hello = {
-	sayHello(name) {
-		name = name || 'world';
-		console.log('hello', name);
-	},
+  sayHello(name) {
+    name = name || 'world';
+    console.log('hello', name);
+    return 'hello ' + name;
+  }
 };
+
 module.exports = hello;
 ```
 
-Este script se puede colocar en un archivo llamado hello.js, por ejemplo. El módulo hello se puede cargar desde otro módulo llamando a la require()función, como se muestra en el siguiente código:
+Para usar el módulo anterior, puedes cargarlo usando la función `require()`, como se muestra en el siguiente código:
 
 ```js
-var hello = require('./hello');
-hello.sayHello('world');
-// prints "hello world"
+const hello = require('./hello');
+hello.sayHello('Marionette'); // 'hello Marionette'
 ```
 
-Cuando requerimos un script con la require()función que no necesitamos agregar la extensión .js, Node lo hará por nosotros automáticamente. Tenga en cuenta que, si agrega la extensión al nombre del script, Node agregará la extensión de todos modos y obtendrá un error porque el hello.js.js archivo no existe.
+En el ejemplo anterior, la función `require()` carga el módulo `hello.js` y devuelve el valor que se exporta en el módulo. Una vez que se carga el módulo, puedes llamar a los métodos expuestos por el módulo.
 
-Esa es la forma en que puedes definir módulos CommonJS para tus proyectos: simplemente exportamos la variable que queremos exponer al exterior del módulo y module.exports luego cargamos el módulo donde sea necesario con require().
-Los módulos de CommonJS son singletons, lo que significa que cada vez que cargues un módulo obtendrás el mismo instancia del objeto. Node almacenará en caché el valor devuelto cuando se llame por primera vez y lo reutilizará para las próximas llamadas.
+## Módulos ES (ESM)
 
-### NPM y paquete.json
+ES Modules (también conocidos como módulos ECMAScript o módulos ES) es la sintaxis de módulos nativa de JavaScript, definida en la especificación ECMAScript 2015 (ES6). A diferencia de CommonJS, que es específico de Node.js, los módulos ES son estándar en JavaScript y funcionan tanto en navegadores como en entornos Node.js modernos.
 
-Con Vite, podemos usar ES Modules nativos en el navegador y también consumir paquetes de npm. Vite resuelve y optimiza las dependencias, de modo que no necesitas definir require() en el navegador.
-Con Vite y npm puedes instalar y definir dependencias para tus proyectos usando package.json y scripts de desarrollo/compilación.
+### Exportación en ESM
 
-El package.json archivo en un proyecto de Node es un archivo JSON que se utiliza para definir, instalar y administrar la versión de las bibliotecas de las que depende su proyecto. Un package.json archivo puede contener muchas opciones de configuración; Puede ver la documentación completa en el sitio web de Node en https://docs.npmjs.com/ . A continuación se muestra una lista de los valores principales.
+```js
+// hello.js
+const hello = {
+  sayHello(name = 'world') {
+    console.log('hello', name);
+    return `hello ${name}`;
+  }
+};
 
-Name - El nombre del proyecto sin espacios
-Description - Un corto descripción del proyecto
-Version – Un número de versión para el proyecto, normalmente comenzando con 0.0.1
-Dependencies - Una lista de bibliotecas con el número de versión del que depende el proyecto
-devDependencies - Igual que dependencias, pero esta lista se utiliza sólo para entornos de desarrollo, útil para poner bibliotecas a prueba, por ejemplo
-licence – Un nombre de licencia para el código del proyecto
+export default hello;
+```
 
-Podemos comenzar con un package.json archivo muy simple que contenga solo algunos campos básicos y luego podemos ampliarlo según sea necesario:
+### Importación en ESM
+
+```js
+import hello from './hello.js';
+hello.sayHello('Marionette'); // 'hello Marionette'
+```
+
+## Diferencias clave entre CommonJS y ESM
+
+1. **Sintaxis**:
+   - CommonJS usa `require()` y `module.exports`
+   - ESM usa `import`/`export`
+
+2. **Carga**:
+   - CommonJS: carga síncrona
+   - ESM: carga asíncrona
+
+3. **Ámbito**:
+   - CommonJS: módulos cargados en tiempo de ejecución
+   - ESM: módulos estáticos, analizados en tiempo de compilación
+
+4. **Compatibilidad**:
+   - CommonJS: nativo en Node.js
+   - ESM: soporte nativo en navegadores modernos y Node.js 12+ con flag `"type": "module"` en package.json
+
+## Uso con Vite
+
+Vite está diseñado para trabajar con módulos ES de forma nativa. Cuando trabajas con Vite:
+
+1. Usa `import`/`export` en tu código fuente
+2. Vite maneja la transformación a formatos compatibles con el navegador
+3. Soporta tanto módulos ES como CommonJS (aunque se prefiere ESM)
+
+## Migración de CommonJS a ESM
+
+Si estás migrando de CommonJS a ESM, estos son los cambios principales:
+
+1. Reemplazar `require()` con `import`
+2. Reemplazar `module.exports` con `export`
+3. Actualizar la extensión de archivos a `.mjs` o configurar `"type": "module"` en package.json
+4. Actualizar referencias a módulos para incluir la extensión (`.js` en navegadores, `.js` o `.mjs` en Node)
+
+## Conclusión
+
+Aunque este libro se centra en Vite y ESM, es útil entender CommonJS ya que muchos paquetes de Node.js aún lo utilizan. Vite maneja automáticamente la interoperabilidad entre ambos sistemas de módulos, lo que te permite usar paquetes de npm sin problemas.
+
+## NPM y package.json
+
+Con Vite, podemos usar ES Modules nativos en el navegador y también consumir paquetes de npm. Vite resuelve y optimiza las dependencias, de modo que no necesitas definir `require()` en el navegador.
+
+Con Vite y npm puedes instalar y definir dependencias para tus proyectos usando `package.json` y scripts de desarrollo/compilación.
+
+El archivo `package.json` en un proyecto de Node es un archivo JSON que se utiliza para definir, instalar y administrar la versión de las bibliotecas de las que depende tu proyecto. Un archivo `package.json` puede contener muchas opciones de configuración; puedes ver la documentación completa en el [sitio web de npm](https://docs.npmjs.com/).
+
+### Campos principales de package.json
+
+- **name**: El nombre del proyecto (sin espacios, en minúsculas)
+- **description**: Una descripción corta del proyecto
+- **version**: Número de versión (sigue [SemVer](https://semver.org/), por ejemplo, 0.0.1)
+- **dependencies**: Lista de bibliotecas necesarias para producción
+- **devDependencies**: Bibliotecas solo para desarrollo (pruebas, compilación, etc.)
+- **scripts**: Comandos ejecutables con `npm run` o `yarn`
+- **license**: Tipo de licencia del código (MIT, ISC, etc.)
+- **type**: `"module"` para usar ESM por defecto
+
+### Ejemplo básico de package.json
+
+Aquí tienes un ejemplo básico de `package.json` para un proyecto Vite + Backbone:
 
 ```json
 {
-	"name": "backbone-contacts ",
-	"version": "0.0.1",
-	"description": "Example code for the book Mastering Backbone.js",
-	"author": "Abiee Alejandro <abiee.alejandro@gmail.com>",
-	"license": "ISC",
-	"dependencies": {},
-	"devDependencies": {}
+  "name": "backbone-contacts",
+  "version": "0.0.1",
+  "description": "Example code for the book Mastering Backbone.js",
+  "author": "Abiee Alejandro <abiee.alejandro@gmail.com>",
+  "license": "ISC",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "backbone": "^1.4.1",
+    "jquery": "^3.6.0",
+    "underscore": "^1.13.1"
+  },
+  "devDependencies": {
+    "vite": "^4.0.0"
+  }
 }
 ```
 
-Como puede ver, todavía no tenemos ninguna dependencia. Podemos instalar nuestra primera dependencia con npm:
+### Instalación de dependencias
+
+Para instalar las dependencias necesarias para un proyecto Backbone con Vite, ejecuta:
 
 ```bash
-$ npm install --save underscore jquery backbone bootstrap
+# Usando npm
+npm install --save underscore jquery backbone
+
+# O usando pnpm (más rápido y eficiente)
+pnpm add underscore jquery backbone
 ```
 
-Este comando instalará las dependencias básicas con las que trabajar backbone; la bandera de guardar actualizará automáticamente el package.json archivo, agregando la biblioteca nombres y sus versiones actuales:
+Este comando instalará las dependencias básicas para trabajar con Backbone. La bandera `--save` actualizará automáticamente el archivo `package.json` con las bibliotecas y sus versiones correspondientes.
 
 ```json
 {
-	"dependencies": {
-		"backbone": "^1.2.1",
-		"bootstrap": "^3.3.5",
-		"jquery": "^2.1.4",
-		"underscore": "^1.8.3"
-	}
+  "dependencies": {
+    "backbone": "^1.4.1",
+    "jquery": "^3.6.0",
+    "underscore": "^1.13.1"
+  }
 }
 ```
 
-El formato de la versión de la biblioteca sigue el semver estándar; Puedes ver más sobre este formato en el semver sitio web oficial.
-Una ventaja de usar el package.json archivo en tu proyecto es que, la próxima vez que quieras instalar las dependencias, no necesitas recordar las bibliotecas y sus versiones; simplemente puede presionar Instalar sin ningún argumento y Node leerá el package.json archivo y realizará las instalaciones por usted:
+### Gestión de versiones
+
+El formato de versión sigue el estándar [SemVer](https://semver.org/), donde:
+
+- `^1.2.3` permite actualizaciones de parche y menores (1.2.3 a 1.9.9, pero no a 2.0.0)
+- `~1.2.3` permite solo actualizaciones de parche (1.2.3 a 1.2.9)
+- `1.2.3` versión exacta
+
+### Instalación de dependencias del equipo
+
+Una de las principales ventajas de usar `package.json` es que los miembros del equipo pueden instalar todas las dependencias con un solo comando:
 
 ```bash
-$ npm install
+# Instalar dependencias de producción y desarrollo
+npm install
+
+# O con pnpm (recomendado)
+pnpm install
 ```
 
-Con npm puede instalar paquetes de desarrollo como la biblioteca de pruebas mocha, pero en lugar de usar el uso de la bandera de guardar save-dev:
+Esto es especialmente útil al:
+
+- Clonar un repositorio por primera vez
+- Actualizar dependencias después de un `git pull`
+- Reconstruir el proyecto en un nuevo entorno
+
+### Actualización de dependencias
+
+Para actualizar las dependencias a sus últimas versiones compatibles:
 
 ```bash
-$ npm install --save-dev mocha
+# Verificar actualizaciones disponibles
+npm outdated
+
+# Actualizar dependencias
+npm update
+
+# O actualizar paquetes específicos
+npm update paquete1 paquete2
 ```
 
-Ahora que sabes cómo instalar dependencias y guardarlas en el package.json archivo, podemos comenzar usando Vite en la aplicación Contactos.
+### Dependencias de desarrollo
 
-Navegar
+Para instalar paquetes que solo son necesarios durante el desarrollo (como herramientas de pruebas o construcción), usa la bandera `--save-dev`:
 
-Con Vite podemos usar ES Modules y paquetes de npm directamente en el navegador. Esto significa que puedes construir tus proyectos con el poder del administrador de paquetes npm y la sintaxis de módulos moderna expuesta en las secciones anteriores. Vite toma tu código fuente, resuelve el grafo de dependencias y lo sirve/compila para el entorno del navegador.
-Un módulo muy simple que expone un objeto con un método que imprime un mensaje de saludo se puede escribir como un módulo de Nodo:
+```bash
+# Instalar Mocha para pruebas
+npm install --save-dev mocha
+
+# O con pnpm
+pnpm add -D mocha
+```
+
+Estas dependencias se guardarán en la sección `devDependencies` de tu `package.json` y no se instalarán en producción.
+
+## Configuración de Vite para Backbone
+
+Con Vite, podemos usar ES Modules y paquetes de npm directamente en el navegador. Esto te permite aprovechar el ecosistema de paquetes de npm junto con la sintaxis moderna de módulos que hemos visto en secciones anteriores. Vite se encarga de:
+
+1. Resolver el grafo de dependencias
+2. Servir los módulos en desarrollo
+3. Compilar y optimizar para producción
+
+### Ejemplo básico de módulo
+
+Un módulo simple que expone un objeto con un método de saludo se vería así:
 
 ```js
 // hello.js
 export default {
-	sayHello(name) {
-		name = name || 'world';
-		console.log('hello', name);
-	},
+  sayHello(name = 'world') {
+    const message = `Hola, ${name}!`;
+    console.log(message);
+    return message;
+  }
 };
 ```
 
-Este sencillo fragmento de código se puede cargar desde otro script como se muestra a continuación:
+### Uso del módulo
+
+Puedes importar y usar este módulo en otro archivo de la siguiente manera:
 
 ```js
 // main.js
-import hello from './hello';
-hello.sayHello(); // hello world
-hello.sayHello('abiee'); // hello abiee
+import hello from './hello.js';
+
+// Usar el módulo
+hello.sayHello('Mundo'); // Muestra: "Hola, Mundo!"
+hello.sayHello();        // Usa el valor por defecto: "Hola, world!"
+hello.sayHello('abiee'); // Muestra: "Hola, abiee!"
 ```
 
-Este código funciona perfectamente con Node. Puedes ejecutarlo de la siguiente manera:
+### Ejecutando el código
+
+Para ejecutar este código en Node.js, necesitarás:
+
+1. Asegurarte de que el archivo `package.json` tenga `"type": "module"`
+2. Ejecutar el archivo principal con Node:
 
 ```bash
-$ node main.js
+node main.js
 ```
+
+### Configuración de Vite
+
+Para usar este código en el navegador con Vite, sigue estos pasos:
+
+1. **Instalar Vite** (si aún no lo has hecho):
+
+   ```bash
+   npm install --save-dev vite
+   ```
+
+2. **Crear archivo de entrada HTML**:
+
+   Crea un archivo `index.html` en la raíz de tu proyecto:
+
+   ```html
+   <!DOCTYPE html>
+   <html lang="es">
+   <head>
+     <meta charset="UTF-8">
+     <title>Mi Aplicación Backbone</title>
+   </head>
+   <body>
+     <script type="module" src="./main.js"></script>
+   </body>
+   </html>
+   ```
+
+3. **Iniciar el servidor de desarrollo**:
+
+   ```bash
+   npx vite
+   ```
+
+   Esto iniciará un servidor de desarrollo con recarga en caliente (HMR) en `http://localhost:5173`.
+
+4. **Scripts recomendados en package.json**:
+
+   Agrega estos scripts a tu `package.json` para facilitar los comandos comunes:
+
+   ```json
+   {
+     "scripts": {
+       "dev": "vite",
+       "build": "vite build",
+       "preview": "vite preview"
+     }
+   }
+   ```
+
+   Luego podrás usar:
+
+   ```bash
+   # Iniciar servidor de desarrollo
+   npm run dev
+
+   # Crear build de producción
+   npm run build
+
+   # Previsualizar build de producción localmente
+   npm run preview
+   ```
 
 Sin embargo, este código no se ejecutará en el navegador porque la importación de módulos no está definida. Vite toma el código de entrada de tu proyecto y rastrea todas las dependencias para crear un único archivo con todos los scripts concatenados:
 
@@ -168,14 +380,14 @@ import Region from './common';
 import './apps/contacts/router';
 
 class App {
-	start() {
-		// The common place where sub-applications will be showed
-		this.mainRegion = new Region({ el: '#main' });
-		// Create a global router to enable sub-applications to
-		// redirect to other URLs
-		this.router = new DefaultRouter();
-		Backbone.history.start();
-	},
+  start() {
+    // The common place where sub-applications will be showed
+    this.mainRegion = new Region({ el: '#main' });
+    // Create a global router to enable sub-applications to
+    // redirect to other URLs
+    this.router = new DefaultRouter();
+    Backbone.history.start();
+  },
 	// ...
 }
 
@@ -187,13 +399,13 @@ El siguiente paso es iniciar la aplicación llamando al start()método en el obj
 
 ```html
 <html>
-	<head>
-		// ...
-	</head>
-	<body>
-		// ...
-		<script type="module" src="/src/main.js"></script>
-	</body>
+  <head>
+    // ...
+  </head>
+  <body>
+    // ...
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
 ```
 
@@ -217,13 +429,13 @@ Esto creará un archivo incluido con todas las dependencias del mismo. Para usar
 
 ```html
 <html>
-	<head>
-		// ...
-	</head>
-	<body>
-		// ...
-		<script type="module" src="/src/main.js"></script>
-	</body>
+  <head>
+    // ...
+  </head>
+  <body>
+    // ...
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
 ```
 
@@ -252,7 +464,7 @@ El módulo de la aplicación continúa la ejecución y finalmente expone el valo
 
 ```js
 class App {
-	// ...
+  // ...
 }
 
 export default App;
@@ -262,8 +474,8 @@ ContactsRouter coincide con una ruta, pero como el valor de la aplicación no es
 
 ```js
 startApp() {
-// App = undefined
-return App.startSubApplication(ContactsApp);
+  // App = undefined
+  return App.startSubApplication(ContactsApp);
 }
 ```
 
@@ -272,12 +484,12 @@ Deberíamos romper el ciclo de alguna manera. Una forma sencilla de hacerlo es s
 ```js
 // apps/contacts/router.js
 class ContactsRouter extends Backbone.Router {
-	// ...
-	async startApp() {
-		const { default: App } = await import('../../app');
-		const { default: ContactsApp } = await import('./app');
-		return App.startSubApplication(ContactsApp);
-	}
+  // ...
+  async startApp() {
+    const { default: App } = await import('../../app');
+    const { default: ContactsApp } = await import('./app');
+    return App.startSubApplication(ContactsApp);
+  }
 }
 ```
 
@@ -304,24 +516,24 @@ import _ from 'underscore';
 import tpl from '../templates/contactListLayout.tpl?raw';
 
 export default class ContactListLayout extends Layout {
-	constructor(options) {
-		super(options);
-		this.template = _.template(tpl);
-		this.regions = {
-			actions: '.actions-bar-container',
-			list: '.list-container',
-		};
-	}
+  constructor(options) {
+    super(options);
+    this.template = _.template(tpl);
+    this.regions = {
+      actions: '.actions-bar-container',
+      list: '.list-container',
+    };
+  }
 
-	get className() {
-		return 'row page-container';
-	}
+  get className() {
+    return 'row page-container';
+  }
 }
 ```
 
 Ahora `contactListLayout.tpl` contiene el texto de la plantilla de diseño para la lista de contactos y lo convertimos a función con `_.template`. Dado que las vistas comunes admiten tanto selectores CSS como funciones de plantilla compiladas, funciona correctamente.
 
-### Configuración de Vite para proyectos modulares (ES Modules, ES2024)
+### Configuración de Vite para proyectos modulares (ES Modules, ESNext)
 
 A continuación se muestra una configuración mínima y práctica de Vite para un proyecto Backbone modular basado en ES Modules (EMAScript 2024) con jQuery y Underscore.
 
@@ -329,11 +541,11 @@ A continuación se muestra una configuración mínima y práctica de Vite para u
 
 ```json
 {
-	"scripts": {
-		"dev": "vite",
-		"build": "vite build",
-		"preview": "vite preview"
-	}
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
 }
 ```
 
@@ -345,25 +557,25 @@ import { defineConfig } from 'vite';
 import path from 'path';
 
 export default defineConfig({
-	resolve: {
-		alias: {
-			'@': path.resolve(__dirname, 'src'),
-		},
-	},
-	optimizeDeps: {
-		// Pre-empaca dependencias tradicionales de Backbone
-		include: ['backbone', 'underscore', 'jquery', 'backbone-validation'],
-	},
-	build: {
-		// Mantener JS moderno (apto para navegadores modernos)
-		target: 'esnext',
-		sourcemap: true,
-		outDir: 'dist',
-	},
-	server: {
-		port: 5173,
-		open: false,
-	},
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+    },
+  },
+  optimizeDeps: {
+    // Pre-empaca dependencias tradicionales de Backbone
+    include: ['backbone', 'underscore', 'jquery', 'backbone-validation'],
+  },
+  build: {
+    // Mantener JS moderno (apto para navegadores modernos)
+    target: 'esnext',
+    sourcemap: true,
+    outDir: 'dist',
+  },
+  server: {
+    port: 5173,
+    open: false,
+  },
 });
 ```
 
@@ -372,15 +584,15 @@ export default defineConfig({
 ```html
 <!doctype html>
 <html>
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Backbone + Vite</title>
-	</head>
-	<body>
-		<div id="main"></div>
-		<script type="module" src="/src/main.js"></script>
-	</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Backbone + Vite</title>
+  </head>
+  <body>
+    <div id="main"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
 ```
 
@@ -420,7 +632,7 @@ import tpl from './templates/view.tpl?raw';
 
 const template = _.template(tpl);
 export default class MyView extends Backbone.View {
-	// ... usar this.template = template;
+  // ... usar this.template = template;
 }
 ```
 
@@ -429,19 +641,180 @@ export default class MyView extends Backbone.View {
 Si aparece una dependencia cíclica (por ejemplo entre `App` y un `Router`), usa importación dinámica para romper el ciclo:
 
 ```js
-async startApp() {
-  const { default: App } = await import('../../app');
-  const { default: ContactsApp } = await import('./app');
-  return App.startSubApplication(ContactsApp);
+class MyRouter extends Backbone.Router {
+  //..
+
+  async startApp() {
+    const { default: App } = await import('../../app');
+    const { default: ContactsApp } = await import('./app');
+    return App.startSubApplication(ContactsApp);
+  }
+  //..
 }
 ```
 
 Con esta configuración tendrás:
 
 - Servidor de desarrollo con HMR (`npm run dev`).
-- Build optimizado moderno (`npm run build`) adecuado para ES Modules/ES2024 mediante `target: 'esnext'`.
+- Build optimizado moderno (`npm run build`) adecuado para ES Modules/ESNext mediante `target: 'esnext'`.
 - Manejo simple de plantillas con `?raw` y `_.template`.
 - Integración de Backbone con jQuery y Underscore sin depender de globals implícitos.
+
+### Routing avanzado (carga perezosa, query params, subaplicaciones)
+
+- **Carga perezosa de módulos**: usa `import()` dentro de handlers para dividir el bundle y romper ciclos.
+
+```js
+// src/apps/contacts/router.js
+import Backbone from 'backbone';
+
+export class ContactsRouter extends Backbone.Router {
+  get routes() {
+    return {
+      'contacts': 'list',
+      'contacts/new': 'create',
+      'contacts/:id': 'show',
+    };
+  }
+  async list() {
+    const { ContactListApp } = await import('./list/app');
+    return new ContactListApp().start();
+  }
+  async create() {
+    const { ContactCreateApp } = await import('./create/app');
+    return new ContactCreateApp().start();
+  }
+  async show(id) {
+    const { ContactShowApp } = await import('./show/app');
+    return new ContactShowApp({ id }).start();
+  }
+}
+```
+
+- **Query params**: lee/escribe parámetros para filtros/paginación con `URLSearchParams` y `navigate`.
+
+```js
+function getQuery() {
+  const frag = window.location.hash || '';
+  const idx = frag.indexOf('?');
+  const qs = idx >= 0 ? frag.slice(idx + 1) : '';
+  return new URLSearchParams(qs);
+}
+
+function setQuery(params) {
+  const base = (window.location.hash || '').split('?')[0];
+  const qs = params.toString();
+  Backbone.history.navigate(`${base}${qs ? '?' + qs : ''}`, { replace: true });
+}
+```
+
+- **Subaplicaciones**: cada ruta arranca una app con su propio `Layout` y regiones, montada en `#main` o región equivalente.
+
+### Paginación y filtros en `CollectionView`
+
+```js
+// src/ui/modules/contacts/list/app.js
+import Backbone from 'backbone';
+import _ from 'underscore';
+
+export class ContactListApp {
+  constructor() {
+    this.state = new Backbone.Model({ page: 1, size: 20, q: '' });
+    this.collection = new (Backbone.Collection.extend({ url: '/api/contacts' }))();
+  }
+  start() {
+    // Sincronizar estado -> URL
+    this.state.on('change', _.debounce(() => {
+      const p = new URLSearchParams(this.state.toJSON());
+      const base = 'contacts';
+      Backbone.history.navigate(`#${base}?${p.toString()}`, { replace: true });
+      // Fetch con params
+      this.collection.fetch({ reset: true, data: this.state.toJSON() });
+    }, 150));
+
+    // Inicial desde URL
+    const params = new URLSearchParams((window.location.hash.split('?')[1] || ''));
+    const init = Object.fromEntries(params.entries());
+    this.state.set({ ...this.state.attributes, ...init }, { silent: true });
+    this.state.trigger('change');
+  }
+}
+```
+
+En UI, los inputs de búsqueda actualizan `state.q` con debounce y los controles de paginación cambian `state.page`.
+
+### Caché ligera de colecciones (TTL + invalidación)
+
+```js
+// src/core/cache.js
+class CacheStore {
+  constructor(ttlMs = 30000) { this.ttl = ttlMs; this.map = new Map(); }
+  key(url, params) { return `${url}?${new URLSearchParams(params || {}).toString()}`; }
+  get(url, params) {
+    const k = this.key(url, params), v = this.map.get(k);
+    if (!v) return null; if (Date.now() > v.exp) { this.map.delete(k); return null; }
+    return v.data;
+  }
+  set(url, params, data) { this.map.set(this.key(url, params), { data, exp: Date.now() + this.ttl }); }
+  invalidate(prefix) { [...this.map.keys()].forEach(k => { if (k.startsWith(prefix)) this.map.delete(k); }); }
+}
+export const cache = new CacheStore(15000);
+
+// Decorador para fetch de colección
+export async function fetchWithCache(col, params) {
+  const cached = cache.get(col.url, params);
+  if (cached) { col.reset(cached); return col; }
+  await col.fetch({ reset: true, data: params });
+  cache.set(col.url, params, col.toJSON());
+  return col;
+}
+```
+
+Inválida caché tras mutaciones (`create/save/destroy`) con `cache.invalidate('/api/contacts')`.
+
+### Code-splitting con `import.meta.glob`
+
+```js
+// src/apps/routes.js
+const modules = import.meta.glob('./**/app.js'); // mapea rutas -> módulos
+
+export async function startApp(path, props) {
+  const mod = modules[`./${path}/app.js`];
+  if (!mod) throw new Error('Ruta no encontrada');
+  const { default: App } = await mod();
+  return new App(props).start();
+}
+```
+
+Puedes pre-cargar vistas críticas con `rel=prefetch` en `index.html` o cargarlas al pasar el mouse usando `requestIdleCallback`.
+
+### Pruebas de navegación y paginación (Vitest + jsdom)
+
+```js
+import { describe, it, expect, vi } from 'vitest';
+import Backbone from 'backbone';
+
+describe('router + paginación', () => {
+  it('actualiza URL y hace fetch con params', async () => {
+    const fetchSpy = vi.spyOn(Backbone.Collection.prototype, 'fetch').mockResolvedValue();
+    const app = new (class { /* usa ContactListApp de arriba */ })();
+    app.collection = new Backbone.Collection();
+    app.state = new Backbone.Model({ page: 1, size: 20, q: '' });
+    app.start = eval('(' + (function start(){
+      const _ = { debounce: (fn)=>fn };
+      this.state.on('change', () => {
+        const p = new URLSearchParams(this.state.toJSON());
+        Backbone.history.navigate(`#contacts?${p.toString()}`, { replace: true });
+        this.collection.fetch({ reset: true, data: this.state.toJSON() });
+      });
+      this.state.trigger('change');
+    }).toString() + ')');
+    app.start();
+    expect(fetchSpy).toHaveBeenCalledWith({ reset: true, data: { page: 1, size: 20, q: '' } });
+    fetchSpy.mockRestore();
+  });
+});
+```
 
 #### Resumen
 

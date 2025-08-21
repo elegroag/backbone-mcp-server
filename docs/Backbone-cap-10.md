@@ -1,6 +1,6 @@
-## Capítulo 10. Autenticación (ES2024 + ESM + Vite)
+# Capítulo 10. Autenticación (ESNext + ESM + Vite)
 
-Este capítulo moderniza la autenticación en aplicaciones Backbone con un enfoque sin estado y ejemplos listos para Vite (bundler) y Express (API), usando módulos ES (ESM) y JavaScript 2024.
+Este capítulo moderniza la autenticación en aplicaciones Backbone con un enfoque sin estado y ejemplos listos para Vite (bundler) y Express (API), usando módulos ES (ESM) y JavaScript moderno (ESNext).
 
 - Objetivo: entender y aplicar Basic Auth y OAuth2 en un entorno SPA + API stateless.
 - Stack: Vite para frontend, Express ESM para API, `fetch` nativo en el navegador.
@@ -8,7 +8,7 @@ Este capítulo moderniza la autenticación en aplicaciones Backbone con un enfoq
 
 ---
 
-### 1) APIs sin estado y dónde guardar la sesión
+## APIs sin estado y dónde guardar la sesión
 
 - En REST, el servidor no guarda estado de tu sesión. Cada request debe incluir credenciales/tokens.
 - El cliente (navegador) debe persistir datos mínimos: token de acceso y tipo de token.
@@ -16,14 +16,14 @@ Este capítulo moderniza la autenticación en aplicaciones Backbone con un enfoq
 
 ---
 
-### 2) Autenticación HTTP Basic
+## Autenticación HTTP Basic
 
 Basic Auth envía en cada petición un encabezado `Authorization: Basic <base64(user:pass)>`.
 
 - Sólo debe usarse sobre HTTPS.
 - Útil para demos o entornos controlados; no para producción con usuarios reales.
 
-#### 2.1 Servidor Express (ESM) – middleware de Basic Auth
+### Servidor Express (ESM) – middleware de Basic Auth
 
 ```js
 // server/basicAuthMiddleware.mjs (ESM)
@@ -42,6 +42,13 @@ export function basicAuthRequired(req, res, next) {
 		return res.sendStatus(401);
 	}
 }
+```
+
+Prerequisito: asegúrate de tener inicializada una `Region` o contenedor principal antes de enrutar. Por ejemplo, en tu arranque:
+
+```js
+// En startApp() o similar
+// App.mainRegion = new Region({ el: '#main' });
 ```
 
 Rutas protegidas:
@@ -95,6 +102,18 @@ export function buildBasic(username, password) {
 }
 ```
 
+Nota: `btoa` solo maneja ASCII. Para credenciales con UTF‑8 (tildes, emojis), usa esta variante:
+
+```js
+// Variante UTF-8 segura
+export function buildBasicUtf8(username, password) {
+	const bytes = new TextEncoder().encode(`${username}:${password}`);
+	let binary = '';
+	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+	return btoa(binary);
+}
+```
+
 Inyección del header en todas las sync de Backbone:
 
 ```js
@@ -109,18 +128,24 @@ export function setupGlobalAuth() {
 	Backbone.sync = function (method, model, options = {}) {
 		const headers = { ...(options.headers || {}) };
 		const a = load();
-		if (a?.type && a?.token) headers.Authorization = `${a.type} ${a.token}`;
+		// Respeta un Authorization explícito en options.headers
+		if (!('Authorization' in headers) && a?.type && a?.token) {
+			headers.Authorization = `${a.type} ${a.token}`;
+		}
+		// Conserva otras opciones como emulateJSON/xhrFields/credentials/beforeSend
 		return originalSync.call(this, method, model, { ...options, headers });
 	};
 }
 ```
+
+Nota: al propagar `...options`, conservas `emulateJSON`, `xhrFields`, `credentials`, `beforeSend` y demás opciones de Backbone/jQuery. Evita sobrescribir `headers.Authorization` si ya se proporciona explícitamente en una llamada puntual.
 
 Vista de Login:
 
 ```js
 // src/ui/modules/auth/view/LoginView.js (ESM)
 import Backbone from 'backbone';
-import { buildBasic, save } from '../../../services/Auth.js';
+import { buildBasicUtf8, save } from '../../../services/Auth.js';
 
 export default class LoginView extends Backbone.View {
 	get events() {
@@ -131,7 +156,7 @@ export default class LoginView extends Backbone.View {
 		e.preventDefault();
 		const username = this.$('#username').val();
 		const password = this.$('#password').val();
-		const token = buildBasic(username, password);
+		const token = buildBasicUtf8(username, password);
 
 		fetch('/api/contacts', {
 			headers: { Authorization: `Basic ${token}` },
@@ -349,6 +374,10 @@ export default defineConfig({
 - Usa siempre HTTPS para evitar exponer credenciales en claro.
 - Evita “Implicit Grant” en SPAs modernas; usa Authorization Code con PKCE si necesitas OAuth2 con terceros.
 - No guardes contraseñas ni tokens largos en `localStorage` sin expiración; prefiere expiraciones cortas y refresh tokens con rotación.
+- Prefiere almacenar el token en memoria (alcance de módulo) y, si necesitas persistencia limitada, refleja sólo un estado mínimo en `sessionStorage`.
+- Aplica una CSP estricta (Content Security Policy) para reducir el riesgo de XSS; tokens en memoria disminuyen el impacto de XSS respecto a `localStorage`.
+- Si usas cookies, habilita `HttpOnly`, `Secure`, `SameSite=Strict` y rotación/invalidación de sesión; evita mezclar cookies y Bearer Tokens sin un propósito claro.
+- Implementa rotación/revocación de refresh tokens y registra intentos fallidos de autenticación.
 - No ejecutes Node como root y registra logs de 401/403.
 
 ---

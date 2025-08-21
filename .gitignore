@@ -18,3 +18,4 @@ pnpm-lock.yaml
 *.mp3
 *.webm
 *.webp
+.vscode/

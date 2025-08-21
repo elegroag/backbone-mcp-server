@@ -1,6 +1,6 @@
-## Capítulo 8. Pruebas de aplicaciones Backbone con ES Modules (ES2024) y Vite
+# Capítulo 8. Pruebas de aplicaciones Backbone con ES Modules (ESNext) y Vite
 
-Probar tu aplicación no es opcional si buscas calidad, confianza y facilidad para refactorizar. En este capítulo actualizamos el enfoque de pruebas a un stack moderno basado en módulos ES (ES2024) y Vite, usando Vitest como test runner por su integración nativa con Vite. También incluimos breves equivalencias para Jest si ya lo usas en otra parte del proyecto.
+Probar tu aplicación no es opcional si buscas calidad, confianza y facilidad para refactorizar. En este capítulo actualizamos el enfoque de pruebas a un stack moderno basado en módulos ES (ESNext) y Vite, usando Vitest como test runner por su integración nativa con Vite. También incluimos breves equivalencias para Jest si ya lo usas en otra parte del proyecto.
 
 En este capítulo verás:
 
@@ -11,7 +11,7 @@ En este capítulo verás:
 
 ---
 
-### Herramientas de prueba modernas
+## Herramientas de prueba modernas
 
 - **Runner y aserciones**: Vitest (integrado con Vite). Alternativa: Jest.
 - **Entorno DOM**: jsdom (Vitest: `environment: 'jsdom'`).
@@ -21,9 +21,11 @@ En este capítulo verás:
 
 Recomendado para Vite: Vitest. Si ya tienes Jest en el proyecto para otros ámbitos (por ejemplo, Node/TypeScript en `src/electron/`), puedes mantenerlo en paralelo y usar Vitest para UI.
 
+> Requisito: Node >= 18 (cobertura V8 y soporte ESM/JSdom estables).
+
 ---
 
-### Configuración con Vite + Vitest
+## Configuración con Vite + Vitest
 
 1. Instala dependencias de test:
 
@@ -31,28 +33,27 @@ Recomendado para Vite: Vitest. Si ya tienes Jest en el proyecto para otros ámbi
 pnpm add -D vitest jsdom @testing-library/dom @testing-library/user-event @testing-library/jest-dom
 ```
 
-2. Añade el bloque `test` a tu `vite.config.ts` para Vitest:
+2.Añade el bloque `test` a tu `vite.config.ts` para Vitest:
 
 ```ts
 // vite.config.ts (añade la sección test)
 import { defineConfig } from 'vite';
-import { join } from 'path';
 
 export default defineConfig({
-	// ...tu configuración actual
-	test: {
-		environment: 'jsdom',
-		setupFiles: ['./src/test/setup.ts'],
-		globals: true,
-		coverage: {
-			provider: 'v8',
-			reportsDirectory: 'coverage-ui',
-		},
-	},
+  // ...tu configuración actual
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    globals: true,
+    coverage: {
+      provider: 'v8',
+      reportsDirectory: 'coverage-ui',
+    },
+  },
 });
 ```
 
-3. Crea `src/test/setup.ts` con inicialización de entorno para Backbone:
+3.Crea `src/test/setup.ts` con inicialización de entorno para Backbone:
 
 ```ts
 // src/test/setup.ts
@@ -67,7 +68,7 @@ import Backbone from 'backbone';
 // globalThis.fetch = ... (si deseas stub global por defecto)
 ```
 
-4. Scripts sugeridos (opcional):
+4.Scripts sugeridos (opcional):
 
 ```json
 {
@@ -91,14 +92,14 @@ pnpm run test:ui
 
 ## Primeros pasos con Vitest (ESM)
 
-#### Especificaciones y suites
+### Especificaciones y suites
 
 En Vitest, igual que en Jasmine/Jest, usas `describe()` para agrupar y `it()`/`test()` para casos. Aserciones con `expect`.
 
 ```ts
 // src/test/math.spec.ts
 import { describe, it, expect } from 'vitest';
-import { sum, subtract, divide } from '@/utils/math';
+import { sum, subtract, divide } from '@/ui/utils/math';
 
 describe('Math utils', () => {
 	it('suma 2 + 2 = 4', () => {
@@ -122,7 +123,7 @@ describe('Math utils', () => {
 Código ESM correspondiente:
 
 ```ts
-// src/ui/utils/math.ts (ESM + ES2024)
+// src/ui/utils/math.ts (ESM + ESNext)
 export const sum = (a: number, b: number) => a + b;
 export const subtract = (a: number, b: number) => a - b;
 export const divide = (a: number, b: number) => {
@@ -183,7 +184,7 @@ export default class Contact extends Backbone.Model {
 ```ts
 // src/test/ui/contacts/contact.model.spec.ts
 import { describe, it, expect } from 'vitest';
-import Contact from '@/modules/contacts/models/ContactModel';
+import Contact from '@/ui/modules/contacts/models/ContactModel';
 
 describe('Contact model', () => {
 	it('tiene valores por defecto', () => {
@@ -211,7 +212,7 @@ Objetivo: verificar renderizado, manejo de eventos DOM y sincronización ante ca
 // src/ui/modules/contacts/views/ContactFormView.ts
 import Backbone from 'backbone';
 import _ from 'underscore';
-import templateRaw from '../view/hbs/contact_form.hbs?raw';
+import templateRaw from './hbs/contact_form.tpl?raw';
 
 export default class ContactFormView extends Backbone.View<Backbone.Model> {
 	className = 'form-horizontal';

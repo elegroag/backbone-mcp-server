@@ -1,4 +1,4 @@
-## Capítulo 9. Implementación en producción (ES2024 + ESM + Vite)
+# Capítulo 9. Implementación en producción (ESNext + ESM + Vite)
 
 Has creado un gran proyecto modular con ES Modules, Vite y pruebas modernas. Ahora toca llevarlo a producción de forma fiable y reproducible. En este capítulo verás:
 
@@ -12,7 +12,7 @@ Este capítulo reemplaza el flujo antiguo (Gulp/Browserify, Ubuntu 14.04, init.d
 
 ---
 
-### 1) Construir el frontend con Vite
+## Construir el frontend con Vite
 
 Prepara la compilación optimizada del cliente:
 
@@ -21,7 +21,7 @@ Prepara la compilación optimizada del cliente:
 pnpm run build
 ```
 
-- La salida se genera en `dist-bone/` según `vite.config.ts`.
+- La salida se genera en `dist/` según `vite.config.ts`.
 - Vite hace splitting, minificación y hashing (si lo configuras). Mantén los assets estáticos ahí.
 
 Opcional: previsualizar el build localmente
@@ -30,11 +30,48 @@ Opcional: previsualizar el build localmente
 pnpm run preview
 ```
 
+```html
+<a id="cap9-imagenes"></a>
+```
+
+### Optimización de imágenes (opcional)
+
+Para reducir el peso de `png/jpg/svg/gif` en el build de producción, puedes integrar `vite-plugin-imagemin`.
+
+Instalación:
+
+```sh
+pnpm add -D vite-plugin-imagemin
+```
+
+Configuración mínima:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import tsconfigPaths from 'vite-tsconfig-paths';
+import viteImagemin from 'vite-plugin-imagemin';
+
+export default defineConfig({
+  plugins: [
+    tsconfigPaths(),
+    viteImagemin({
+      gifsicle: { optimizationLevel: 3 },
+      optipng: { optimizationLevel: 5 },
+      mozjpeg: { quality: 80 },
+      svgo: { plugins: [{ name: 'removeViewBox', active: false }] },
+    }),
+  ],
+});
+```
+
+Nota: también puedes optimizar imágenes en una tarea separada o en tu pipeline de CI si prefieres mantener el build de Vite más rápido.
+
 ---
 
 ### 2) Servir los estáticos con Express (ESM)
 
-Crea un pequeño servidor Express en ESM que sirva `dist-bone/` y exponga tu API (si aplica). Ejemplo `server/index.js` (el proyecto usa `"type": "module"` en `package.json`):
+Crea un pequeño servidor Express en ESM que sirva `dist/` y exponga tu API (si aplica). Ejemplo `server/index.js` (el proyecto usa `"type": "module"` en `package.json`):
 
 ```js
 import express from 'express';
@@ -48,7 +85,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Sirve estáticos del build de Vite
-const distPath = path.resolve(__dirname, '../dist-bone');
+const distPath = path.resolve(__dirname, '../dist');
 app.use(express.static(distPath, { maxAge: '1y', etag: true }));
 
 // API opcional (ejemplo)
@@ -68,6 +105,59 @@ Recomendaciones:
 
 - Define `NODE_ENV=production` y `PORT` en el entorno (no hardcodees valores).
 - Si estás detrás de un proxy (Nginx), añade `app.set('trust proxy', 1)` para cookies/seguridad.
+- Protege Express con `helmet` y `compression`:
+
+```js
+import helmet from 'helmet';
+import compression from 'compression';
+
+app.use(helmet());
+app.use(compression());
+```
+
+#### 2.1) Endurecimiento adicional: CSP, HSTS y cookies seguras
+
+Activa una política de seguridad de contenido (CSP), HSTS y cabeceras adicionales. Ajusta los orígenes según tu app (APIs, CDNs, S3, etc.). Recuerda habilitar `trust proxy` si estás detrás de Nginx para que `secure: true` en cookies funcione.
+
+```js
+import helmet from 'helmet';
+
+app.set('trust proxy', 1); // cookies Secure detrás de proxy
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", 'https:', "'unsafe-inline'"], // evita inline si puedes usar hashes
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        connectSrc: ["'self'", 'https://api.example.com'], // ajusta orígenes de API
+        fontSrc: ["'self'", 'https:', 'data:'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    hsts: { maxAge: 15552000, includeSubDomains: true, preload: true }, // ~180 días
+    referrerPolicy: { policy: 'no-referrer' },
+  })
+);
+
+// Ejemplo de cookie segura (si optas por cookies en lugar de Bearer tokens)
+app.get('/login-demo', (req, res) => {
+  res.cookie('session', 'opaque_token', {
+    httpOnly: true,
+    secure: true, // requiere HTTPS
+    sameSite: 'strict',
+    path: '/',
+    maxAge: 60 * 60 * 1000, // 1h
+  });
+  res.sendStatus(204);
+});
+```
 
 ---
 
@@ -98,7 +188,7 @@ server {
 
   # Archivos estáticos directos (opcional si tienes CDN)
   location ~* \.(js|css|png|jpg|jpeg|gif|svg|woff2?|ttf|ico)$ {
-    root /home/production/app/dist-bone;  # ajusta ruta
+    root /home/production/app/dist;  # ajusta ruta
     access_log off;
     expires 1y;
     add_header Cache-Control "public, immutable";
@@ -120,6 +210,21 @@ server {
     proxy_set_header Connection "upgrade";
 
     proxy_pass http://webapp;
+  }
+}
+```
+
+Alternativa SPA simplificada (sirviendo todo como estático y fallback a index.html):
+
+```nginx
+server {
+  listen 80;
+  server_name www.example.com example.com; # cambia por tu dominio
+
+  root /home/production/app/dist; # carpeta de build de Vite
+
+  location / {
+    try_files $uri /index.html;
   }
 }
 ```
@@ -183,8 +288,7 @@ pm2 status
 pm2 logs webapp
 
 # Arranque automático (systemd)
-pmdir=$(pm2 conf | sed -n 's/.*PM2_HOME.*"\(.*\)".*/\1/p')
-pwd && pm2 save
+pm2 save
 pm2 startup systemd -u production --hp /home/production
 # sigue las instrucciones que imprime PM2 (sudo ...)
 ```
@@ -198,7 +302,7 @@ Notas:
 
 ### 5) PaaS (Heroku/Render/Fly) con ESM + Vite
 
-Si prefieres PaaS, el patrón es similar: construir con Vite y ejecutar un servidor Node/Express que sirva `dist-bone/`.
+Si prefieres PaaS, el patrón es similar: construir con Vite y ejecutar un servidor Node/Express que sirva `dist/`.
 
 - `Procfile` (Heroku):
 
@@ -234,10 +338,11 @@ Nota: Heroku cambió modelos de planes; alternativas modernas: Render, Fly.io, R
 
 ### 6) Checklist de despliegue
 
-- [ ] `pnpm run build` genera `dist-bone/` sin warnings.
+- [ ] `pnpm run build` genera `dist/` sin warnings.
 - [ ] `server/index.js` (ESM) sirve estáticos y fallback SPA.
 - [ ] `NODE_ENV=production` y `PORT` definidos (PM2/env/systemd).
 - [ ] Nginx configurado (proxy headers, WebSocket, cache estáticos, TLS).
+- [ ] Headers de seguridad activos: CSP/HSTS en Express (y equivalentes en Nginx si sirve estáticos).
 - [ ] PM2 en modo `cluster`, con `pm2 save` y `pm2 startup systemd`.
 - [ ] Logs en `pm2 logs` y en Nginx (`/var/log/nginx/...`).
 
@@ -245,7 +350,7 @@ Nota: Heroku cambió modelos de planes; alternativas modernas: Render, Fly.io, R
 
 #### Resumen
 
-- Construimos el frontend con Vite y servimos `dist-bone/` desde un Express ESM.
+- Construimos el frontend con Vite y servimos `dist/` desde un Express ESM.
 - Pusimos Nginx delante como reverse proxy.
 - Orquestamos el proceso con PM2 y systemd para alta disponibilidad.
 - Dejamos una guía rápida para PaaS modernas (Heroku/Render/Fly) sin Gulp ni herramientas legacy.

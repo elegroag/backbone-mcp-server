@@ -1,4 +1,4 @@
-## Capítulo 11 · Migración de un proyecto Backbone (jQuery + Underscore) a TypeScript
+# Capítulo 11 · Migración de un proyecto Backbone (jQuery + Underscore) a TypeScript
 
 Este capítulo guía una migración ordenada y gradual de un proyecto Backbone modular que usa jQuery y Underscore a TypeScript (TS), manteniendo ES Modules (ESM), Vite y los patrones del proyecto (plantillas `?raw` + `_.template`, clases base de vistas, alias `@`).
 
@@ -38,11 +38,12 @@ Puedes ampliar tu `tsconfig.json` existente o crear uno específico para la UI (
 
 ```jsonc
 {
-  "extends": "./tsconfig.json", // si ya tienes base TS en Electron
+  "extends": "./tsconfig.json", // si ya tienes base TS
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "Bundler", // óptimo con Vite
+    "moduleResolution": "Bundler", // óptimo con Vite (TS 5+)
+    "verbatimModuleSyntax": true,    // recomendado con ESM
     "jsx": "preserve",
     "strict": true,
     "noImplicitAny": true,
@@ -52,11 +53,15 @@ Puedes ampliar tu `tsconfig.json` existente o crear uno específico para la UI (
     "useDefineForClassFields": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
+    "skipLibCheck": true,            // agiliza migración
+    "allowJs": true,                 // permite convivir .js y .ts
+    "checkJs": false,                // ponlo en true si quieres avisos en .js
+    "lib": ["ES2022", "DOM"],
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/ui/*"],
-      "#electron/*": ["src/electron/*"]
+      "@/*": ["src/ui/*"]
+      // "#electron/*": ["src/electron/*"] // opcional, sólo si usas Electron
     }
   },
   "include": ["src/ui/**/*.ts", "src/ui/**/*.d.ts"],
@@ -64,14 +69,67 @@ Puedes ampliar tu `tsconfig.json` existente o crear uno específico para la UI (
 }
 ```
 
+### Inicio de history y carga perezosa
+
+En el arranque de la UI, inicia el router con `pushState` cuando el servidor soporte rutas limpias:
+
+```ts
+// src/ui/main.ts
+import Backbone from 'backbone';
+import { ProductsRouter } from '@/modules/products/ProductsRouter';
+
+new ProductsRouter();
+Backbone.history.start({ pushState: true });
+```
+
+Para dividir el bundle, carga vistas/módulos bajo demanda dentro de handlers:
+
+```ts
+// dentro de un handler de router
+async list() {
+  const { ProductsListView } = await import('./view/ProductsListView');
+  const view = new ProductsListView({ el: '#app' });
+  view.render();
+}
+```
+
+Nota: `moduleResolution: "Bundler"` y `verbatimModuleSyntax` requieren TypeScript 5+.
+
 Asegúrate que Vite ya resuelve `@` en `vite.config.ts` (capítulos previos). Si no, añade el alias también ahí para que TS e IDE queden alineados.
+
+### Alineación TS y Vite (ESNext)
+
+Para evitar discrepancias entre el tipo de salida y la resolución de módulos:
+
+- Mantén alias `@` en `tsconfig.ui.json` (`compilerOptions.paths`) y en `vite.config.ts` (`resolve.alias`).
+- Es válido usar `target: "ES2022"` en TS (análisis de tipos) y `build.target = 'esnext'` en Vite (salida del bundle moderno).
+- Usa el plugin `vite-tsconfig-paths` para alinear rutas de TS con Vite automáticamente.
+
+Ejemplo `vite.config.ts`:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import tsconfigPaths from 'vite-tsconfig-paths';
+
+export default defineConfig({
+  resolve: { alias: { '@': '/src/ui' } },
+  build: { target: 'esnext', sourcemap: true },
+  plugins: [tsconfigPaths()],
+});
+```
 
 ## Declaraciones de módulos (plantillas y assets)
 
-Para importar plantillas HBS como texto con `?raw` y que TS no se queje, crea/edita un archivo de tipos global, por ejemplo `types/app.d.ts` (ya existe carpeta `types/` en el repo):
+Para importar plantillas como texto con `?raw` y que TS no se queje, crea/edita un archivo de tipos global, por ejemplo `types/app.d.ts` (crea la carpeta `types/` si no existe):
 
 ```ts
 // types/app.d.ts
+declare module '*.tpl?raw' {
+  const src: string;
+  export default src;
+}
+
 declare module '*.hbs?raw' {
   const src: string;
   export default src;
@@ -84,6 +142,20 @@ declare module '*.html?raw' {
 ```
 
 Si importas estilos o imágenes desde TS, considera añadir declaraciones según sea necesario.
+
+### Plantillas, CSP y precompilación
+
+`_.template()` compila usando `new Function` cuando lo haces en runtime, lo cual puede requerir `'unsafe-eval'` en tu CSP. Recomendación:
+
+- Desarrollo: compilar en runtime (más simple).
+- Producción: precompilar plantillas para evitar `'unsafe-eval'`.
+
+Opciones de precompilación:
+
+- Mantener Underscore y precompilar con un script propio (transformar `*.tpl` a funciones en build).
+- Migrar plantillas a Handlebars precompilado si el proyecto ya lo usa.
+
+Integra estas decisiones con la CSP del Cap. 9 (Helmet), permitiendo `'unsafe-eval'` solo en desarrollo si fuera necesario.
 
 ## Integración de Backbone con jQuery en TS
 
@@ -113,13 +185,33 @@ import _, { template } from 'underscore';
 - Compila plantillas con tipos de contexto:
 
 ```ts
-import formTplSrc from './view/hbs/productos_form_view.hbs?raw';
+import formTplSrc from './view/hbs/productos_form_view.tpl?raw';
 
 type ProductoFormCtx = { titulo: string; producto: ProductoAttrs };
 const renderForm = template(formTplSrc) as (ctx: ProductoFormCtx) => string;
 ```
 
 > En TS, `template()` retorna una función de tipo `(data?: object) => string`. Puedes refinarla con el `as` del contexto esperado.
+
+### Helper para plantillas con tipos
+
+Para evitar repetir `as (ctx: ...) => string` en cada vista, centraliza un helper:
+
+```ts
+// src/ui/common/templates.ts
+import { template } from 'underscore';
+export function compileTpl<C>(src: string) {
+  return template(src) as (ctx: C) => string;
+}
+```
+
+Uso:
+
+```ts
+import { compileTpl } from '@/common/templates';
+import formTplSrc from './hbs/productos_form_view.tpl?raw';
+const renderForm = compileTpl<{ producto: ProductoAttrs }>(formTplSrc);
+```
 
 ## Patrones de tipado para Backbone
 
@@ -182,7 +274,7 @@ export class ProductosCollection extends Backbone.Collection<ProductoModel> {
 import Backbone from 'backbone';
 import $ from 'jquery';
 import { template } from 'underscore';
-import formTplSrc from './hbs/productos_form_view.hbs?raw';
+import formTplSrc from './hbs/productos_form_view.tpl?raw';
 import { ProductoModel, type ProductoAttrs } from '../models/ProductoModel';
 
 const renderForm = template(formTplSrc) as (ctx: {
@@ -193,6 +285,12 @@ export class ProductsFormView extends Backbone.View<ProductoModel> {
   // opcional: refinar el tipo de this.$el
   declare $el: JQuery;
 
+  constructor(options: { model: ProductoModel; el: Element | string }) {
+    super(options);
+    // Asegura el modelo desde el constructor y vincula render
+    this.listenTo(this.model, 'change', this.render);
+  }
+
   events() {
     return {
       'submit form': 'onSubmit',
@@ -200,13 +298,8 @@ export class ProductsFormView extends Backbone.View<ProductoModel> {
     } as Backbone.EventsHash;
   }
 
-  initialize() {
-    // cualquier suscripción model/collection aquí
-    this.listenTo(this.model!, 'change', this.render);
-  }
-
   render() {
-    const html = renderForm({ producto: this.model!.toJSON() });
+    const html = renderForm({ producto: this.model.toJSON() });
     this.$el.html(html);
     return this;
   }
@@ -220,8 +313,8 @@ export class ProductsFormView extends Backbone.View<ProductoModel> {
       precio: Number($form.find('[name="precio"]').val() || 0),
       activo: Boolean($form.find('[name="activo"]').prop('checked')),
     };
-    this.model!.set(attrs);
-    if (!this.model!.validationError) {
+    this.model.set(attrs);
+    if (!this.model.validationError) {
       this.trigger('save:producto', this.model);
     }
   }
@@ -302,11 +395,58 @@ Si tu UI ya usa clases base en `src/ui/common/` (por ejemplo `ModelView`, `Colle
 
 7. **Modo estricto y limpieza**
 
-   - Sube `strictness` progresivamente (`noImplicitAny`, `exactOptionalPropertyTypes` si aplica).
-   - Elimina `// @ts-ignore` y añade tipos faltantes.
+- Sube `strictness` progresivamente (`noImplicitAny`, `exactOptionalPropertyTypes` si aplica).
+- Recomendadas adicionales:
+  - `noUncheckedIndexedAccess: true`
+  - `useUnknownInCatchVariables: true`
+  - `noPropertyAccessFromIndexSignature: true`
+  - Elimina `// @ts-ignore` y añade tipos faltantes.
 
-8. **Build/QA**
-   - Ajusta scripts para compilar/verificar TS. Con Vite, la transpilación corre en dev; para type-check usa `tsc -p tsconfig.ui.json --noEmit` en CI.
+8.**Build/QA**
+
+- Ajusta scripts para compilar/verificar TS. Con Vite, la transpilación corre en dev; para type-check usa `tsc -p tsconfig.ui.json --noEmit` en CI.
+
+## Pruebas (Vitest + DOM + MSW)
+
+Configura entorno DOM para pruebas de vistas:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+  test: { environment: 'happy-dom', setupFiles: ['src/ui/test/setup.ts'], globals: true },
+});
+```
+
+Ejemplo mínimo de prueba de vista:
+
+```ts
+// src/ui/modules/products/view/ProductsFormView.spec.ts
+import { describe, it, expect } from 'vitest';
+import { ProductsFormView } from './ProductsFormView';
+import { ProductoModel } from '../models/ProductoModel';
+
+describe('ProductsFormView', () => {
+  it('renderiza y emite save al enviar', () => {
+    const view = new ProductsFormView({ el: document.createElement('div'), model: new ProductoModel() });
+    view.render();
+    expect(view.$('form').length).toBe(1);
+  });
+});
+```
+
+Mock de API con MSW en tests de integración (opcional) para colecciones/servicios.
+
+## Calidad: ESLint/Prettier y checker en dev
+
+Añade scripts y, si quieres, integra `vite-plugin-checker` para errores TS/ESLint en caliente.
+
+```ts
+// vite.config.ts
+import Checker from 'vite-plugin-checker';
+// ...
+plugins: [tsconfigPaths(), Checker({ typescript: true })];
+```
 
 ## Ejemplo de importación de plantilla con clases base
 
@@ -314,7 +454,7 @@ Si tu UI ya usa clases base en `src/ui/common/` (por ejemplo `ModelView`, `Colle
 // src/ui/modules/products/view/ProductsDetailView.ts
 import { ModelView } from '@/common/ModelView'; // suponiendo que ya migraste esta base a TS
 import { template } from 'underscore';
-import tplSrc from './hbs/products_detail.hbs?raw';
+import tplSrc from './hbs/products_detail.tpl?raw';
 import { ProductoModel } from '../models/ProductoModel';
 
 const renderTpl = template(tplSrc) as (ctx: {
@@ -339,6 +479,16 @@ import Backbone from 'backbone';
 Backbone.$ = $;
 ```
 
+Ubícalo en el bootstrap de la UI (por ejemplo, `src/ui/main.ts` o en tu `startApp()`).
+
+- Para compatibilidad con plugins legacy que esperan globals:
+
+```ts
+// opcional y controlado: sólo si algún plugin lo requiere
+(window as any).$ = $;
+(window as any).jQuery = $;
+```
+
 - **Electron/IPC**: tipa `window.electron` o, preferentemente, usa `IpcClient` con genéricos:
 
 ```ts
@@ -352,6 +502,41 @@ export async function invoke<T>(
 ```
 
 - **Módulos compartidos**: define DTOs en `types/` o `src/shared/` y reutilízalos en Electron y UI.
+
+### Fronteras Electron vs Web (tsconfigs separados)
+
+Mantén tipos de Node/Electron fuera de la UI web usando tsconfigs distintos:
+
+```jsonc
+// tsconfig.ui.json
+{
+  "compilerOptions": { "lib": ["ES2022", "DOM"], "types": ["vite/client"], "allowJs": true }
+}
+// tsconfig.electron.json
+{
+  "compilerOptions": { "lib": ["ES2022", "DOM"], "types": ["electron", "node"] }
+}
+```
+
+Configura builds independientes cuando empaquetes Electron.
+
+### Validación de datos (runtime) en IPC/API
+
+Refuerza contratos usando Zod:
+
+```ts
+// services/IpcClient.ts
+import { z } from 'zod';
+
+export async function invokeParsed<T>(channel: string, payload: unknown, schema: z.ZodType<T>): Promise<T> {
+  const result = await window.electron.invoke(channel, payload);
+  return schema.parse(result);
+}
+
+// usage
+const ProductoDto = z.object({ id: z.number(), nombre: z.string(), sku: z.string(), precio: z.number(), activo: z.boolean() });
+const dto = await invokeParsed('productos:get', { id: 1 }, ProductoDto);
+```
 
 ## Gotchas frecuentes
 
@@ -381,12 +566,18 @@ En `package.json` añade (si no los tienes):
     "typecheck:ui": "tsc -p tsconfig.ui.json --noEmit",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint \"src/ui/**/*.{ts,js}\"",
+    "format": "prettier -w ."
   }
 }
 ```
 
 Ejecuta `pnpm typecheck:ui` en CI para validar tipos sin emitir archivos.
+
+> Tip: añade `rollup-plugin-visualizer` para inspeccionar tamaño de bundles tras build.
 
 ## Conclusión
 

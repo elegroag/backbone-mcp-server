@@ -1,4 +1,4 @@
-## Capítulo 5. Manejo de archivos
+# Capítulo 5. Manejo de archivos
 
 Cuando crea una aplicación Backbone, consumirá recursos de un servicio web RESTful; sin embargo, la mayoría de los servicios RESTful utilizan el formato JSON para codificar información, pero JSON no es adecuado para enviar y recibir archivos. ¿Cómo podemos enviar archivos a un servidor RESTful?
 Si está desarrollando una aplicación que no requiere mucho JavaScript, puede enviar archivos a través de un formulario HTML, pero en aplicaciones de una sola página (SPA) esta no es la mejor manera de hacerlo. Otro problema es que Backbone no proporciona un mecanismo sencillo para enviar archivos porque no es compatible con la especificación RESTful.
@@ -11,7 +11,7 @@ Crear un recurso que incluya un archivo
 
 Comenzaremos agregando soporte para cargar archivos a un servidor Express porque es importante saber cómo un servidor puede responder a las solicitudes de carga.
 
-### Servidor Express
+## Servidor Express
 
 Para demostrar cómo enviar archivos a un servidor, en este capítulo trabajaremos con la última versión de Express (la última versión disponible al momento de escribir este artículo es Express 4.x). El servidor será responsable de almacenar los recursos REST y manejar la carga de archivos. Consulte el repositorio de GitHub de este libro para obtener la implementación del servidor de los capítulos anteriores.
 Por ahora, el servidor actual puede crear, obtener, actualizar y eliminar recursos de contacto; necesitamos agregar un mecanismo para cargar una imagen de avatar para un contacto. Para simplificar, la aplicación no utiliza una base de datos para almacenar sus datos; en su lugar usa una tabla hash en memoria. Por ejemplo, el siguiente fragmento muestra cómo almacenar un contacto:
@@ -33,8 +33,8 @@ En desarrollo, lo más práctico es que Vite sirva el frontend con HMR y reenví
 
 - **Dependencias (dev)**:
 
-   - `concurrently` y `nodemon` para levantar ambos servicios en desarrollo.
-   - Instala: `pnpm add -D concurrently nodemon` (o npm/yarn equivalente).
+- `concurrently` y `nodemon` para levantar ambos servicios en desarrollo.
+- Instala: `pnpm add -D concurrently nodemon` (o npm/yarn equivalente).
 
 - **vite.config.ts** (proxy a Express en desarrollo):
 
@@ -104,9 +104,9 @@ app.listen(PORT, () => console.log(`Express API escuchando en http://localhost:$
 ```
 
 - **Notas**:
-   - Con el proxy de Vite no necesitas CORS en desarrollo; si decides no usar proxy, habilita CORS en Express.
-   - Mantén las rutas de subida consistentes (`/api/...` y `/avatar`) para que el proxy funcione sin cambios en el código del cliente.
-   - En producción, sirve `dist/` con Express para una app SPA y deja la API bajo `/api`.
+- Con el proxy de Vite no necesitas CORS en desarrollo; si decides no usar proxy, habilita CORS en Express.
+- Mantén las rutas de subida consistentes (`/api/...` y `/avatar`) para que el proxy funcione sin cambios en el código del cliente.
+- En producción, sirve `dist/` con Express para una app SPA y deja la API bajo `/api`.
 
 #### Requisitos ESM en Node
 
@@ -647,6 +647,234 @@ class ContactEditor {
 ```
 
 Por supuesto, la implementación del servidor debería poder decodificar avatarImage y almacenarlo como un archivo de imagen.
+
+### Subidas modernas: progreso, cancelación y reintentos (XHR + AbortController)
+
+Para subir con progreso fiable en navegadores modernos, utiliza `XMLHttpRequest` (fetch aún no expone progreso de subida en la mayoría de navegadores). A la vez, podemos soportar cancelación con `AbortController` y reintentos exponenciales para errores transitorios.
+
+```js
+// src/upload/UploadManager.js
+export class UploadManager {
+  constructor({ baseUrl = '/api' } = {}) { this.baseUrl = baseUrl; }
+
+  upload({ url, file, fieldName = 'avatar', headers = {}, signal, retries = 2, backoffMs = 400, onProgress }) {
+    return new Promise((resolve, reject) => {
+      let aborted = false;
+      let attempt = 0;
+
+      const attemptUpload = () => {
+        const form = new FormData();
+        form.append(fieldName, file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url.startsWith('http') ? url : `${this.baseUrl}${url}`);
+        Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+
+        if (signal) {
+          const onAbort = () => { aborted = true; try { xhr.abort(); } catch (_) {} };
+          if (signal.aborted) onAbort();
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+
+        if (xhr.upload && onProgress) {
+          xhr.upload.addEventListener('progress', (ev) => {
+            if (!ev.lengthComputable) return;
+            onProgress({ total: ev.total, loaded: ev.loaded, percent: ev.loaded / ev.total });
+          });
+        }
+
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState !== 4) return;
+          // Éxito
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({ ok: true }); }
+            return;
+          }
+          // Abortado por el usuario
+          if (aborted) return reject(Object.assign(new Error('Upload aborted'), { code: 'ABORT_ERR' }));
+          // Reintentos para 429/5xx
+          if ((xhr.status === 429 || xhr.status >= 500) && attempt < retries) {
+            const wait = backoffMs * Math.pow(2, attempt++);
+            setTimeout(attemptUpload, wait);
+            return;
+          }
+          reject(Object.assign(new Error(`Upload failed: ${xhr.status}`), { status: xhr.status }));
+        };
+
+        xhr.send(form);
+      };
+
+      attemptUpload();
+    });
+  }
+}
+```
+
+Integración desde un controlador Backbone que emite eventos para la vista:
+
+```js
+// src/apps/contacts/controllers/uploader.js
+import Backbone from 'backbone';
+import { UploadManager } from '@/upload/UploadManager.js';
+
+export class AvatarUploader extends Backbone.Model {
+  constructor(attrs, opts) { super(attrs, opts); this.um = new UploadManager({ baseUrl: '/api' }); }
+  upload(contactId, file, { signal } = {}) {
+    this.trigger('upload:start');
+    return this.um.upload({
+      url: `/contacts/${contactId}/avatar`, file, fieldName: 'avatar', signal,
+      onProgress: ({ percent }) => this.trigger('upload:progress', percent),
+    })
+    .then((json) => { this.trigger('upload:done', json); return json; })
+    .catch((err) => { this.trigger(err.code === 'ABORT_ERR' ? 'upload:aborted' : 'upload:error', err); throw err; });
+  }
+}
+```
+
+Uso en la vista con botón de cancelar:
+
+```js
+// src/apps/contacts/views/contactPreview.js (fragmento)
+const ac = new AbortController();
+this.listenTo(uploader, 'upload:start', () => this.$('.progress').show());
+this.listenTo(uploader, 'upload:progress', (p) => this.$('.progress-bar').css('width', `${Math.round(p*100)}%`));
+this.listenTo(uploader, 'upload:done', () => this.$('.progress').hide());
+this.listenTo(uploader, 'upload:aborted upload:error', () => this.$('.progress').hide());
+
+// iniciar
+uploader.upload(contact.id, file, { signal: ac.signal });
+
+// cancelar
+this.$('.btn-cancel-upload').on('click', () => ac.abort());
+```
+
+### Descargas con progreso y cancelación (fetch + streams)
+
+Para descargas, `fetch` sí permite progreso leyendo el `ReadableStream` de la respuesta.
+
+```js
+// src/download/downloadWithProgress.js
+export async function downloadWithProgress(url, { signal, onProgress } = {}) {
+  const res = await fetch(url, { signal });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const reader = res.body.getReader();
+  let received = 0; const chunks = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break; chunks.push(value); received += value.byteLength;
+    if (onProgress && total) onProgress({ total, loaded: received, percent: received / total });
+  }
+  const blob = new Blob(chunks);
+  return blob;
+}
+```
+
+Cancelar con `AbortController` como en subidas.
+
+### Drag & Drop y validación previa
+
+```js
+// src/apps/contacts/views/contactPreview.js (fragmento)
+const MAX_SIZE = 2 * 1024 * 1024; // 2MB
+const TYPES = ['image/jpeg', 'image/png', 'image/gif'];
+
+this.$('.photo').on('dragover', (e) => { e.preventDefault(); this.$('.photo').addClass('drag'); });
+this.$('.photo').on('dragleave', () => this.$('.photo').removeClass('drag'));
+this.$('.photo').on('drop', (e) => {
+  e.preventDefault(); this.$('.photo').removeClass('drag');
+  const file = e.originalEvent.dataTransfer.files[0];
+  if (!file) return;
+  if (!TYPES.includes(file.type)) return App.notifyError('Formato no soportado');
+  if (file.size > MAX_SIZE) return App.notifyError('Archivo demasiado grande');
+  this.trigger('avatar:selected', file);
+});
+```
+
+### Pruebas de subidas con MSW + Vitest
+
+Configura MSW para interceptar `POST /api/contacts/:id/avatar` y simular respuestas. Ejemplo básico:
+
+```js
+// tests/upload.test.js
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
+import { UploadManager } from '@/upload/UploadManager.js';
+
+const server = setupServer(
+  rest.post('http://localhost:3000/api/contacts/:id/avatar', (req, res, ctx) => {
+    return res(ctx.status(201), ctx.json({ success: true, avatar: { url: '/avatar/abc.jpg' } }));
+  }),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+afterAll(() => server.close());
+afterEach(() => server.resetHandlers());
+
+describe('UploadManager', () => {
+  it('sube archivo y devuelve JSON', async () => {
+    const um = new UploadManager({ baseUrl: 'http://localhost:3000/api' });
+    const blob = new Blob(['hello'], { type: 'image/png' });
+    const json = await um.upload({ url: '/contacts/1/avatar', file: blob });
+    expect(json.success).toBe(true);
+  });
+
+  it('reintenta en 500 y luego tiene éxito', async () => {
+    let called = 0;
+    server.use(
+      rest.post('http://localhost:3000/api/contacts/:id/avatar', (req, res, ctx) => {
+        called += 1;
+        if (called === 1) return res(ctx.status(500));
+        return res(ctx.status(201), ctx.json({ success: true }));
+      }),
+    );
+    const um = new UploadManager({ baseUrl: 'http://localhost:3000/api' });
+    const blob = new Blob(['x'], { type: 'image/png' });
+    const json = await um.upload({ url: '/contacts/1/avatar', file: blob, retries: 1, backoffMs: 1 });
+    expect(json.success).toBe(true);
+  });
+
+  it('permite cancelar con AbortController', async () => {
+    server.use(
+      rest.post('http://localhost:3000/api/contacts/:id/avatar', async (req, res, ctx) => {
+        // simula endpoint lento
+        await new Promise((r) => setTimeout(r, 50));
+        return res(ctx.status(201), ctx.json({ success: true }));
+      }),
+    );
+    const um = new UploadManager({ baseUrl: 'http://localhost:3000/api' });
+    const ctrl = new AbortController();
+    const p = um.upload({ url: '/contacts/1/avatar', file: new Blob(['y']), signal: ctrl.signal });
+    ctrl.abort();
+    await expect(p).rejects.toMatchObject({ code: 'ABORT_ERR' });
+  });
+});
+```
+
+Notas:
+
+- En Node, MSW intercepta `fetch` y XHR si tu entorno de test lo soporta; en Vitest + jsdom, ambos quedan cubiertos.
+- Si necesitas asertar el contenido multipart, puedes usar `ctx.json` para responder y sólo verificar la llamada (MSW no procesa multipart en Node por defecto).
+
+### Limpieza con HMR (Vite)
+
+Si tienes subidas en curso y el módulo se reemplaza, aborta las operaciones para evitar fugas:
+
+```js
+// src/upload/hmr-cleanup.js
+const controllers = new Set();
+export function trackController(ctrl) { controllers.add(ctrl); return ctrl; }
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    controllers.forEach((c) => { try { c.abort(); } catch {} });
+    controllers.clear();
+  });
+}
+```
+
+Integra `trackController(new AbortController())` cuando inicies una subida.
 
 ### Resumen
 

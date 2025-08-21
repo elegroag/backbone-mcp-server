@@ -1,4 +1,4 @@
-# BACKBONE MASTER PROFESIONAL
+# Backbone Master Profesional
 
 En el libro, construirás una aplicación funcional aplicando los conceptos que aquí se exponen. La aplicación es lo suficientemente simple como para poner en práctica los conceptos básicos al crear aplicaciones frontend escalables con Backbone. En cualquier momento, puede ver el código del proyecto en el repositorio de libros en https://github.com/abiee/mastering-backbone
 
@@ -96,7 +96,7 @@ La aplicación se inicia cuando la infraestructura de la aplicación se carga en
 
 ```js
 // app.js
-var App = {
+const App = {
   Models: {},
   Collections: {},
   Routers: {},
@@ -128,44 +128,44 @@ Subaplicaciones debe registrar sus routes en el App.Routers objeto global para p
 
 App.Routers = App.Routers || {};
 class ContactsRouter extends Backbone.Router {
-	constructor(options) {
-		super(options);
-		this.routes = {
-		'contacts': 'showContactList',
-		'contacts/page/:page': 'showContactList',
-		'contacts/new': 'createContact',
-		'contacts/view/:id': 'showContact',
-		'contacts/edit/:id': 'editContact'
-		};
-		this.\_bindRoutes();
-	}
+  constructor(options) {
+    super(options);
+    this.routes = {
+    'contacts': 'showContactList',
+    'contacts/page/:page': 'showContactList',
+    'contacts/new': 'createContact',
+    'contacts/view/:id': 'showContact',
+    'contacts/edit/:id': 'editContact'
+    };
+    this.bindRoutes();
+  }
 
-	showContactList(page) {
-		// Page should be a postive number grater than 0
-		page = page || 1;
-		page = page > 0 ? page : 1;
-		var app = this.startApp();
-		app.showContactList(page);
-	}
+  showContactList(page) {
+    // Page should be a postive number grater than 0
+    page = page || 1;
+    page = page > 0 ? page : 1;
+    var app = this.startApp();
+    app.showContactList(page);
+  }
 
-	createContact() {
-		var app = this.startApp();
-		app.showNewContactForm();
-	}
+  createContact() {
+    var app = this.startApp();
+    app.showNewContactForm();
+  }
 
-	showContact(contactId) {
-		var app = this.startApp();
-		app.showContactById(contactId);
-	}
+  showContact(contactId) {
+    var app = this.startApp();
+    app.showContactById(contactId);
+  }
 
-	editContact(contactId) {
-		var app = this.startApp();
-		app.showContactEditorById(contactId);
-	}
+  editContact(contactId) {
+    var app = this.startApp();
+    app.showContactEditorById(contactId);
+  }
 
-	startApp() {
-		return App.startSubApplication(ContactsApp);
-	}
+  startApp() {
+    return App.startSubApplication(ContactsApp);
+  }
 }
 // Register the router to be initialized by the infrastructure
 // Application
@@ -177,7 +177,7 @@ Cuando el usuario señala su navegador a una de estas rutas, se activa un contro
 El startSubApplication() método en el App objeto inicia una nueva subaplicación y cierra cualquier otra subaplicación que se esté ejecutando en un momento dado, esto es útil para liberar recursos en el navegador del usuario:
 
 ```js
-var App = {
+const App = {
   // ...
   // Only a subapplication can be running at once, destroy any
   // current running subapplication and start the asked one
@@ -380,19 +380,19 @@ Como puede ver en laCuando esto sucede, contact:delete se activa un evento, el c
 
 ```js
 deleteContact(view, contact) {
-	let message = 'The contact will be deleted';
-	App.askConfirmation(message, (isConfirm) => {
-		if (isConfirm) {
-			contact.destroy({
-				success() {
-					App.notifySuccess('Contact was deleted');
-				},
-				error() {
-					App.notifyError('Ooops... Something went wrong');
-				}
-			});
-		}
-	});
+  let message = 'The contact will be deleted';
+  App.askConfirmation(message, (isConfirm) => {
+    if (isConfirm) {
+      contact.destroy({
+        success() {
+          App.notifySuccess('Contact was deleted');
+        },
+        error() {
+          App.notifyError('Ooops... Something went wrong');
+        }
+      });
+    }
+  });
 }
 ```
 
@@ -403,35 +403,35 @@ El método que solicita la confirmación puede ser una simple confirm()llamada, 
 ```js
 // app.js
 
-var App = {
-	// ...
-	askConfirmation(message, callback) {
-		var isConfirm = confirm(message);
-		callback(isConfirm);
-	}
+const App = {
+  // ...
+  askConfirmation(message, callback) {
+    var isConfirm = confirm(message);
+    callback(isConfirm);
+  }
 };
 
 Sin embargo, en las aplicaciones web modernas, utilizar la confirm()función simple no es la mejor manera de solicitar confirmación. En su lugar, podemos mostrar un cuadro de diálogo Bootstrap o usar una biblioteca disponible para eso. Para simplificar, usaremos la agradable SweetAlert biblioteca JavaScript; sin embargo, puedes usar lo que quieras:
 
 // app.js
-var App = {
-	// ...
-	askConfirmation(message, callback) {
-		var options = {
-			title: 'Are you sure?',
-			type: 'warning',
-			text: message,
-			showCancelButton: true,
-			confirmButtonText: 'Yes, do it!',
-			confirmButtonColor: '#5cb85c',
-			cancelButtonText: 'No'
-		};
+const App = {
+  // ...
+  askConfirmation(message, callback) {
+    var options = {
+      title: 'Are you sure?',
+      type: 'warning',
+      text: message,
+      showCancelButton: true,
+      confirmButtonText: 'Yes, do it!',
+      confirmButtonColor: '#5cb85c',
+      cancelButtonText: 'No'
+    };
 
-		// Show the message
-		swal(options, function(isConfirm) {
-			callback(isConfirm);
-		});
-	}
+    // Show the message
+    swal(options, function(isConfirm) {
+      callback(isConfirm);
+    });
+  }
 };
 ```
 
@@ -439,7 +439,7 @@ Podemos implementar los métodos de notificación de forma similar. Usaremos la 
 
 ```js
 // app.js
-var App = {
+const App = {
   // ...
   notifySuccess(message) {
     new noty({
@@ -481,6 +481,46 @@ router.js: Este es el enrutador de la aplicación instanciada por la aplicación
 contactList.js, contactEditor.js, contactViewer.js: Estos son los controladores de la aplicación.
 
 Para una contacts aplicación, la organización del código puede ser como se muestra a continuación:
+
+```text
+.
+├─ app.js                # Punto de entrada de la aplicación raíz
+├─ index.html            # HTML principal
+├─ vendor/               # Bibliotecas de terceros (Backbone, jQuery, Underscore, etc.)
+│  ├─ backbone.js
+│  ├─ jquery.js
+│  └─ underscore.js
+├─ core/                 # Funciones núcleo: utilidades, adaptadores, regiones
+│  ├─ regions/
+│  │  └─ region.js
+│  ├─ adapters/
+│  │  └─ restAdapter.js
+│  └─ utils/
+│     └─ templateLoader.js
+├─ Components/          # Componentes compartidos (navbar, diálogos, notificaciones)
+│  ├─ dialogs/
+│  │  ├─ confirm.js
+│  │  └─ notify.js
+│  └─ navigation/
+│     └─ navbar.js
+└─ apps/                # Subaplicaciones
+   └─ contacts/
+      ├─ app.js         # Fachada de la subaplicación
+      ├─ router.js      # Enrutador de la subaplicación
+      ├─ models/        # Modelos y colecciones
+      │  ├─ contact.js
+      │  └─ contacts.js
+      ├─ controllers/   # Controladores de caso de uso
+      │  ├─ contactList.js
+      │  ├─ contactEditor.js
+      │  └─ contactViewer.js
+      └─ views/         # Vistas y layouts
+         ├─ ContactListLayout.js
+         ├─ ContactListActionBar.js
+         ├─ ContactListView.js
+         ├─ ContactEditorView.js
+         └─ ContactViewerView.js
+```
 
 ### Resumen
 

@@ -1,4 +1,4 @@
-## Capítulo 6. Almacenar datos en el navegador
+# Capítulo 6. Almacenar datos en el navegador
 
 Backbone fue diseñado principalmente para funcionar con servidores API RESTful; sin embargo, no siempre se desea almacenar los datos en un servidor para aplicaciones fuera de línea o interrumpir la carga de aplicaciones al almacenar datos de caché en el navegador.
 Tenemos dos opciones para almacenar datos en el navegador del usuario: usar localStorage o la nueva API IndexedDB. Si bien localStorage tiene un amplio soporte en los principales navegadores, IndexedDB es la nueva especificación que aún no será compatible en un futuro próximo. Otra opción que está disponible actualmente; sin embargo, en estado obsoleto está Web SQL. Si está desarrollando aplicaciones web modernas, debe evitar el uso de Web SQL.
@@ -9,7 +9,7 @@ Conceptos básicos de IndexedDB
 Usar localStorage en lugar de un servidor RESTful para almacenar información
 Usando IndexedDB en lugar de un servidor RESTful para almacenar información
 
-#### El almacenamiento local
+## El almacenamiento local
 
 El localStorage es el almacén de datos del navegador más simple y compatible. En el momento de escribir este libro, es compatible con casi todos los principales navegadores. Como se muestra en la siguiente figura, el único navegador que no admite almacenamiento local es Opera Mini:
 
@@ -83,13 +83,16 @@ const contactList = [];
 
 // Get all contacts
 for (let i = 0; i < availableIds.length; i++) {
-	let id = availableIds[i];
-	let contact = JSON.parse(localStorage.getItem(id));
-	contactList.push(contact);
+  let id = availableIds[i];
+  let contact = JSON.parse(localStorage.getItem(id));
+  contactList.push(contact);
 }
+//...
+```
 
 Para prevenir colisión entre colecciones de modelos con la misma ID, puede generar claves con prefijo para los elementos de la colección de modo que, en lugar de tener claves numéricas como 1, pueda usar claves como contacts-1:
 
+```js
 var data = localStorage.get('contacts'); // 1, 5, 6
 var availableIds = data.split(',');
 const contactList = [];
@@ -110,7 +113,7 @@ Para que la capa de almacenamiento sea mantenible, primero deberá crear un cont
 
 En el próximo En la sección, le mostraré cómo construir el DataStore controlador para almacenar los modelos de Backbone en localStorage.
 
-#### Almacenar modelos de Backbone en localStorage
+## Almacenar modelos de Backbone en localStorage
 
 Es tiempo de Utilice lo que ha aprendido para localStorage almacenar y recuperar objetos. El DataStore objeto es responsable de transformar los modelos en cadenas para almacenarse en localStorage:
 
@@ -539,7 +542,7 @@ IndexedDB es más flexible y potente que localStorage; sin embargo, un gran pode
 Bases de datos suele cambiar con el tiempo; tal vez una nueva característica necesite una nueva tienda o agregue un índice. Todas las bases de datos IndexedDB tienen un número de versión. La primera vez que crea una nueva base de datos, comienza con la versión 1. Con la ayuda de cada número de versión, puede definir las tiendas y los índices que necesite.
 IndexedDB no le permite crear nuevas tiendas o índices, a menos que haya cambiado el número de versión. Cuando se detecta un nuevo número de versión, IndexedDB ingresa a un versionchangeestado y llama a la onupgradedneeded()devolución de llamada, que puede usar para modificar la base de datos.
 Cada vez que cambia el número de versión, tiene la oportunidad de ejecutar migraciones de bases de datos en la onupgradedneeded()devolución de llamada. Cada vez que abre una conexión con IndexedDB, puede especificar un número de versión:
-indexedDB.open(<database name>, <version number>)
+indexedDB.open(`<database name>`, `<version number>`)
 
 La primera vez que abre una base de datos, IndexedDB ingresa al versionchangeestado y llama a la onupgradedneeded()devolución de llamada.
 
@@ -1163,6 +1166,492 @@ class ContactEditor {
 
 	// ...
 }
+```
+
+### Arquitectura Offline-first con ES Modules y Vite (híbrida: local + remoto)
+
+Además de usar `localStorage` o `IndexedDB` como reemplazo del servidor, una estrategia moderna es un enfoque híbrido: trabajar siempre con una copia local (rápida y disponible offline) y sincronizar con la API cuando sea posible. Beneficios:
+
+- __Velocidad__: lecturas desde IndexedDB/localStorage al instante.
+- __Resiliencia__: operaciones mutativas se encolan cuando no hay red y se reintentan luego.
+- __Experiencia__: UI optimista con resolución de conflictos simple (`updatedAt`).
+
+A continuación se muestra un conjunto de utilidades y un `sync` personalizado que integran Backbone con IndexedDB, soportan cola de operaciones, reintentos y reasignación de IDs temporales.
+
+#### Utilidades IndexedDB con Promesas (ESM)
+
+```js
+// src/offline/db.js
+// Pequeño wrapper de IndexedDB con Promesas y 2 stores: 'entities' y 'pending'
+const DB_NAME = 'app-offline';
+const DB_VERSION = 1;
+
+export function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('entities')) {
+        const s = db.createObjectStore('entities', { keyPath: 'key' });
+        s.createIndex('byType', 'type');
+      }
+      if (!db.objectStoreNames.contains('pending')) {
+        db.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta', { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function putEntity(type, id, data) {
+  const db = await openDB();
+  return txPromise(db, 'entities', 'readwrite', (store) => store.put({ key: `${type}:${id}`, type, id, data }));
+}
+
+export async function getEntity(type, id) {
+  const db = await openDB();
+  const rec = await txPromise(db, 'entities', 'readonly', (s) => s.get(`${type}:${id}`));
+  return rec && rec.data;
+}
+
+export async function putCollection(type, list) {
+  // Guarda cada item individualmente para lecturas rápidas y compón una lista en meta
+  const db = await openDB();
+  await txPromise(db, 'entities', 'readwrite', async (s) => {
+    for (const it of list) s.put({ key: `${type}:${it.id}`, type, id: it.id, data: it });
+  });
+  await txPromise(db, 'meta', 'readwrite', (m) => m.put({ key: `list:${type}`, ids: list.map((x) => x.id), ts: Date.now() }));
+}
+
+export async function getCollection(type) {
+  const db = await openDB();
+  const meta = await txPromise(db, 'meta', 'readonly', (m) => m.get(`list:${type}`));
+  if (!meta) return [];
+  const out = [];
+  await txPromise(db, 'entities', 'readonly', async (s) => {
+    for (const id of meta.ids) {
+      const rec = await requestToPromise(s.get(`${type}:${id}`));
+      if (rec) out.push(rec.data);
+    }
+  });
+  return out;
+}
+
+export async function enqueue(op) {
+  const db = await openDB();
+  return txPromise(db, 'pending', 'readwrite', (s) => s.add({ ...op, enqueuedAt: Date.now() }));
+}
+
+export async function readQueue() {
+  const db = await openDB();
+  const items = [];
+  await txPromise(db, 'pending', 'readonly', (s) => new Promise((res) => {
+    const r = s.openCursor();
+    r.onsuccess = () => { const c = r.result; if (c) { items.push(c.value); c.continue(); } else res(); };
+  }));
+  return items;
+}
+
+export async function dequeue(id) {
+  const db = await openDB();
+  return txPromise(db, 'pending', 'readwrite', (s) => s.delete(id));
+}
+
+function txPromise(db, store, mode, fn) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, mode);
+    const s = tx.objectStore(store);
+    const ret = fn(s);
+    tx.oncomplete = () => resolve(ret instanceof IDBRequest ? undefined : ret);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function requestToPromise(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+```
+
+#### `offlineSync`: Backbone.sync híbrido con cola y reintentos
+
+```js
+// src/offline/offlineSync.js
+import Backbone from 'backbone';
+import { enqueue, readQueue, dequeue, putEntity, putCollection, getEntity, getCollection } from '@/offline/db.js';
+
+export function installOfflineSync({ apiBase = '/api', staleMs = 60_000 } = {}) {
+  const originalSync = Backbone.sync;
+
+  async function flushQueue() {
+    if (!navigator.onLine) return;
+    const items = await readQueue();
+    for (const item of items) {
+      try {
+        const res = await sendToServer(item);
+        await applyServerResult(item, res);
+        await dequeue(item.id);
+      } catch (_) {
+        // mantener en cola; siguiente intento cuando vuelva online
+        break;
+      }
+    }
+  }
+
+  window.addEventListener('online', () => flushQueue());
+
+  async function sendToServer({ type, method, url, body }) {
+    const res = await fetch(url.startsWith('http') ? url : `${apiBase}${url}` , {
+      method: mapMethod(method),
+      headers: { 'content-type': 'application/json' },
+      body: method === 'read' ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async function applyServerResult(item, json) {
+    const { type, method, body } = item;
+    if (method === 'create') {
+      // reasignación de IDs temporales a definitivos
+      const serverId = json.id ?? json.data?.id;
+      await putEntity(type, serverId, { ...body, id: serverId });
+    } else if (method === 'update') {
+      await putEntity(type, body.id, { ...body, ...json });
+    } else if (method === 'delete') {
+      await putEntity(type, body.id, undefined); // opcional: limpiar cache
+    } else if (method === 'read') {
+      if (Array.isArray(json)) await putCollection(type, json);
+      else await putEntity(type, json.id, json);
+    }
+  }
+
+  function mapMethod(m) {
+    switch (m) { case 'create': return 'POST'; case 'update': return 'PUT'; case 'delete': return 'DELETE'; default: return 'GET'; }
+  }
+
+  Backbone.sync = async function (method, model, options = {}) {
+    const type = model.store || model.urlRoot || (model.collection && model.collection.url) || 'items';
+    const isCollection = !model.id && method === 'read' && model.models;
+    const url = (typeof model.url === 'function' ? model.url() : model.url) || options.url;
+
+    // 1) Lecturas: intenta cache primero (SWr: stale-while-revalidate)
+    if (method === 'read') {
+      try {
+        const cached = isCollection ? await getCollection(type) : await getEntity(type, model.id);
+        if (cached && options.success) options.success(cached);
+      } catch {}
+      try {
+        const data = await sendToServer({ type, method, url });
+        await applyServerResult({ type, method }, data);
+        if (options.success) options.success(data);
+      } catch (err) {
+        if (!navigator.onLine) {
+          // offline: ya devolvimos cache si existía
+          if (options.error) options.error(err);
+        } else {
+          if (options.error) options.error(err);
+        }
+      }
+      return Promise.resolve();
+    }
+
+    // 2) Mutaciones: enviar si online; encolar si offline o fallo de red
+    const body = model.toJSON();
+    if (method === 'create' && !body.id) body.id = `tmp_${model.cid}`;
+
+    const op = { type, method, url, body };
+
+    if (!navigator.onLine) {
+      await optimisticLocal(type, method, body);
+      await enqueue(op);
+      if (options.success) options.success(body);
+      return Promise.resolve();
+    }
+
+    try {
+      const data = await sendToServer(op);
+      await applyServerResult(op, data);
+      if (options.success) options.success(data);
+    } catch (err) {
+      // Encolar para reintento (p. ej., servidor caído)
+      await optimisticLocal(type, method, body);
+      await enqueue(op);
+      if (options.success) options.success(body); // UI optimista
+    }
+    // Disparar flush asíncrono
+    flushQueue();
+    return Promise.resolve();
+  };
+
+  async function optimisticLocal(type, method, body) {
+    if (method === 'create' || method === 'update') await putEntity(type, body.id, { ...body, updatedAt: body.updatedAt || new Date().toISOString() });
+  }
+
+  // expose para pruebas
+  Backbone.offline = { flushQueue };
+
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      window.removeEventListener('online', flushQueue);
+    });
+  }
+
+  return () => (Backbone.sync = originalSync);
+}
+```
+
+Notas:
+
+- __Reasignación de ID__: al crear offline, se usa `tmp_<cid>`; al sincronizar, se persiste el ID del servidor en cache. Si la vista depende del ID, escucha un evento y actualiza rutas/URL.
+- __Conflictos__: utiliza `updatedAt` y una política simple LWW (last-write-wins). Para mayor robustez, puedes pedir ETags/If-Match.
+- __SWr__: las lecturas devuelven cache primero y luego actualizan en background.
+
+#### Indicador de conectividad y experiencia de usuario
+
+```js
+// src/offline/connectivity.js
+import Backbone from 'backbone';
+
+export const NetBus = Object.assign({}, Backbone.Events);
+function emit() { NetBus.trigger(navigator.onLine ? 'online' : 'offline'); }
+window.addEventListener('online', emit);
+window.addEventListener('offline', emit);
+emit();
+```
+
+En tus vistas, muestra un banner cuando `NetBus` emita `offline` y bloquea acciones sensibles o infórmalas como “pendientes de sincronización”.
+
+#### Pruebas: Vitest + MSW + fake-indexeddb
+
+```js
+// tests/offline-sync.test.js
+import 'fake-indexeddb/auto';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
+import Backbone from 'backbone';
+import { installOfflineSync } from '@/offline/offlineSync.js';
+
+const server = setupServer(
+  rest.post('http://localhost:3000/api/contacts', async (req, res, ctx) => {
+    const body = await req.json();
+    return res(ctx.status(201), ctx.json({ ...body, id: 101 }));
+  }),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+afterAll(() => server.close());
+afterEach(() => server.resetHandlers());
+
+describe('offlineSync', () => {
+  it('enqueue create cuando está offline y sincroniza al volver online', async () => {
+    // Fuerza offline
+    Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });
+    installOfflineSync({ apiBase: 'http://localhost:3000/api' });
+
+    const Contact = Backbone.Model.extend({ urlRoot: '/contacts', store: 'contacts' });
+    const c = new Contact({ name: 'Ada' });
+
+    await new Promise((r) => c.save(null, { success: r }));
+    expect(c.get('id')).toMatch(/^tmp_/);
+
+    // Ahora online y el server asigna id=101
+    Object.defineProperty(window.navigator, 'onLine', { value: true });
+    window.dispatchEvent(new Event('online'));
+
+    // Espera a que flush complete
+    await new Promise((r) => setTimeout(r, 50));
+    // En app real, se obtendría por un fetch posterior o un evento; aquí validamos que no falle
+  });
+});
+```
+
+Sugerencias:
+
+- Usa `fake-indexeddb` para que las APIs `indexedDB` existan en Vitest (Node).
+- En MSW, define handlers para `POST/PUT/DELETE/GET` y prueba reintentos y reasignación de IDs.
+
+#### Service Worker (opcional)
+
+Para mejorar el modo offline, añade un Service Worker con Vite (por ejemplo, Workbox) para cachear assets y peticiones GET. Mantén las mutaciones en la cola del `offlineSync`.
+
+#### Limpieza con HMR
+
+Si reinstalas módulos en desarrollo, elimina listeners (`online/offline`) en `dispose` como se muestra en `installOfflineSync`.
+
+#### Compatibilidad con localStorage
+
+Para escenarios simples o prototipos, puedes implementar los mismos conceptos sobre `localStorage` con un adaptador con la misma interfaz `getEntity/putEntity/readQueue/enqueue`.
+
+#### Resolución de conflictos con ETags/If-Match
+
+Para robustecer la sincronización, añade control de concurrencia condicional:
+
+- __Servidor__: responde `ETag` en `POST/PUT` y valida `If-Match` en `PUT` devolviendo `412 Precondition Failed` en caso de conflicto.
+- __Cliente__: guarda `etag` junto al recurso y envía `If-Match` en actualizaciones.
+
+Extensión de `offlineSync` (sólo fragmentos relevantes):
+
+```js
+// sendToServer ahora entrega { json, etag }
+async function sendToServer({ type, method, url, body, etag }) {
+  const res = await fetch(url.startsWith('http') ? url : `${apiBase}${url}`, {
+    method: mapMethod(method),
+    headers: {
+      'content-type': 'application/json',
+      ...(etag ? { 'if-match': etag } : {}),
+    },
+    body: method === 'read' ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 412) {
+    const latest = await fetch(`${apiBase}${url}`).then((r) => r.json());
+    const err = new Error('Precondition Failed');
+    err.code = 412; err.latest = latest; return Promise.reject(err);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return { json, etag: res.headers.get('etag') };
+}
+
+async function applyServerResult(item, result) {
+  const { type, method, body } = item;
+  const { json, etag } = result.json ? result : { json: result, etag: undefined };
+  if (method === 'create' || method === 'update') {
+    const id = method === 'create' ? (json.id ?? json.data?.id) : body.id;
+    await putEntity(type, id, { ...body, ...json, etag });
+  } else if (method === 'delete') {
+    await putEntity(type, body.id, undefined);
+  } else if (method === 'read') {
+    if (Array.isArray(json)) await putCollection(type, json);
+    else await putEntity(type, json.id, { ...json, etag });
+  }
+}
+
+// En mutaciones, pasa etag si existe
+const op = { type, method, url, body, etag: body.etag };
+```
+
+Manejo de `412` en UI: muestra un diff con `err.latest`, ofrece “Conservar mío”, “Aceptar servidor” o “Combinar”. Puedes volver a intentar `PUT` tras aplicar una estrategia de merge y actualizando `If-Match` con el nuevo `etag`.
+
+#### Pruebas adicionales (conflictos, update/delete)
+
+```js
+// tests/offline-conflict.test.js
+import 'fake-indexeddb/auto';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
+import Backbone from 'backbone';
+import { installOfflineSync } from '@/offline/offlineSync.js';
+
+const server = setupServer(
+  rest.put('http://localhost:3000/api/contacts/:id', async (req, res, ctx) => {
+    if (req.headers.get('if-match') !== 'v2') {
+      return res(ctx.status(412), ctx.json({ message: 'conflict' }));
+    }
+    const body = await req.json();
+    return res(ctx.status(200), ctx.set('ETag', 'v3'), ctx.json({ ...body }));
+  })
+);
+
+beforeAll(() => server.listen());
+afterAll(() => server.close());
+
+describe('conflictos con ETag', () => {
+  it('recibe 412 y permite resolver', async () => {
+    installOfflineSync({ apiBase: 'http://localhost:3000/api' });
+    const Contact = Backbone.Model.extend({ urlRoot: '/contacts', store: 'contacts' });
+    const c = new Contact({ id: 1, name: 'Ada', etag: 'v1' });
+    // Simula cambio remoto a v2
+    // Primer intento: 412
+    await expect(c.save({ name: 'Ada L.' })).resolves.toBeUndefined();
+    // La app debería capturar 412 y guiar al usuario a reintentar con etag actualizado
+  });
+});
+```
+
+Agrega también casos de `DELETE` offline (se encola y aplica al volver online) y `PUT` sin cambios (idempotencia básica).
+
+#### Adaptador localStorage equivalente
+
+```js
+// src/offline/localAdapter.js
+const P = (k) => `offline:${k}`;
+
+function read(k, d = null) { try { return JSON.parse(localStorage.getItem(P(k))) ?? d; } catch { return d; } }
+function write(k, v) { localStorage.setItem(P(k), JSON.stringify(v)); }
+
+export async function putEntity(type, id, data) {
+  const key = `entity:${type}:${id}`;
+  if (data === undefined) localStorage.removeItem(P(key));
+  else write(key, data);
+  const meta = read(`list:${type}`, { ids: [], ts: 0 });
+  if (!meta.ids.includes(id)) meta.ids.push(id);
+  meta.ts = Date.now(); write(`list:${type}`, meta);
+}
+
+export async function getEntity(type, id) { return read(`entity:${type}:${id}`); }
+
+export async function putCollection(type, list) {
+  list.forEach((it) => write(`entity:${type}:${it.id}`, it));
+  write(`list:${type}`, { ids: list.map((x) => x.id), ts: Date.now() });
+}
+
+export async function getCollection(type) {
+  const meta = read(`list:${type}`); if (!meta) return [];
+  return meta.ids.map((id) => read(`entity:${type}:${id}`)).filter(Boolean);
+}
+
+export async function enqueue(op) {
+  const q = read('pending', []); q.push({ ...op, enqueuedAt: Date.now(), id: q.length ? q[q.length - 1].id + 1 : 1 }); write('pending', q);
+}
+
+export async function readQueue() { return read('pending', []); }
+export async function dequeue(id) { write('pending', read('pending', []).filter((x) => x.id !== id)); }
+```
+
+Puedes inyectar este adaptador en lugar del de IndexedDB en entornos donde IndexedDB no esté disponible.
+
+#### Service Worker con Workbox (GET cacheable)
+
+```js
+// sw.js
+import { registerRoute } from 'workbox-routing';
+import { StaleWhileRevalidate } from 'workbox-strategies';
+
+registerRoute(
+  ({ url, request }) => request.method === 'GET' && url.pathname.startsWith('/api/'),
+  new StaleWhileRevalidate({ cacheName: 'api-get' })
+);
+```
+
+Con Vite, usa `vite-plugin-pwa` para registrar el SW y generar el manifiesto. Mantén las mutaciones fuera del SW; el `offlineSync` gestiona la cola.
+
+#### Migraciones de IndexedDB
+
+- Incrementa `DB_VERSION` y usa `onupgradeneeded` para crear stores/índices.
+- Para mover datos, abre cursores del store antiguo y reescribe en el nuevo.
+
+```js
+req.onupgradeneeded = (ev) => {
+  const db = req.result; const old = ev.oldVersion;
+  if (old < 2) {
+    const s = db.transaction ? db.transaction(['entities'], 'readwrite').objectStore('entities') : null;
+    // ejemplo: crear índice nuevo sin pérdida
+    if (!db.objectStoreNames.contains('entities')) {
+      db.createObjectStore('entities', { keyPath: 'key' });
+    }
+    const store = ev.currentTarget.result.transaction('entities', 'readwrite').objectStore('entities');
+    if (!store.indexNames.contains('byUpdatedAt')) store.createIndex('byUpdatedAt', 'data.updatedAt');
+  }
+};
 ```
 
 #### Resumen
