@@ -72,11 +72,11 @@ server.registerTool(
             caseSensitive: z.boolean().optional().describe('Distinguir mayúsculas/minúsculas'),
             maxExcerpts: z.number().int().min(1).max(5).optional().describe('Número de fragmentos por capítulo'),
         }
-    } as any,
-    async (args: any) => {
-        const query = args?.query as string;
-        const caseSensitive = args?.caseSensitive as boolean | undefined;
-        const maxExcerpts = args?.maxExcerpts as number | undefined;
+    },
+    async (args) => {
+        const query = args.query;
+        const caseSensitive = args.caseSensitive;
+        const maxExcerpts = args.maxExcerpts;
         const results = searchResources(query, { caseSensitive, maxExcerpts });
         if (!results.length) {
             return {
