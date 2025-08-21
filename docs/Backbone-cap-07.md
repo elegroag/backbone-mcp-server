@@ -588,9 +588,221 @@ async initDataTable() {
 
 - **Modales**: Bootstrap maneja foco y `aria-` por defecto; cierra con `dispose()` en `remove()` para restaurar correctamente el foco.
 - **Tabs**: usa la estructura `role="tablist"`/`role="tabpanel"` (la plantilla ya la incluye) y activa con la API (`new Tab(btn).show()`) para mantener estados accesibles.
-- **DataTables**: revisa textos de botones y traducciones; personaliza `language` según tus necesidades.
+  - **DataTables**: revisa textos de botones y traducciones; personaliza `language` según tus necesidades.
 
 ---
+
+### Integración con Electron 37 (Escritorio) + Backbone + Vite
+
+Objetivo: empaquetar tu frontend Backbone (renderizador) como una app de escritorio con Electron v37, manteniendo DX moderna con Vite en desarrollo y un build de producción empaquetado.
+
+- **Requisitos**
+  - Node 18+.
+  - Electron 37.
+  - Vite ya configurado (ver secciones anteriores).
+
+- **Estructura sugerida**
+
+```text
+project/
+  electron/
+    main.js       # Proceso principal (ESM)
+    preload.js    # Bridge seguro (contextBridge)
+  src/            # Renderizador: Backbone + Vite (ya existente)
+  index.html      # Entrada del renderizador
+  vite.config.js
+  package.json
+```
+
+- **Instalación**
+
+```bash
+pnpm add -D electron@^37 concurrently wait-on cross-env electron-builder
+# o npm/yarn equivalente
+```
+
+Nota (ESM): si usas `import` en `electron/main.js` (ES Modules), añade `"type": "module"` en tu `package.json` o usa extensiones `.mjs` para los archivos del proceso principal/preload.
+
+- **Scripts en `package.json`** (dev con HMR + Electron, build y distribución)
+
+```json
+{
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:main": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "dev": "concurrently -k -n VITE,MAIN -c green,cyan \"npm:dev:renderer\" \"npm:dev:main\"",
+    "build:renderer": "vite build",
+    "build": "npm run build:renderer",
+    "dist": "npm run build && electron-builder -l"
+  },
+  "build": {
+    "appId": "com.ejemplo.backboneapp",
+    "files": ["dist/**/*", "electron/**/*"],
+    "extraMetadata": { "main": "electron/main.js" },
+    "linux": { "target": "AppImage" }
+  }
+}
+```
+
+- **electron/main.js** (ESM, seguridad por defecto, dev/prod auto)
+
+```js
+// electron/main.js
+import { app, BrowserWindow, ipcMain } from 'electron';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let win;
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: true,
+    },
+  });
+
+  const devUrl = process.env.VITE_DEV_SERVER_URL; // p.ej. http://localhost:5173
+  if (devUrl) {
+    win.loadURL(devUrl);
+    win.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    const indexPath = path.join(process.cwd(), 'dist', 'index.html');
+    win.loadFile(indexPath);
+  }
+}
+
+// Ejemplo de manejador IPC (invocations)
+ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('ping', () => 'pong');
+
+app.whenReady().then(createWindow);
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+```
+
+- **electron/preload.js** (aislar y exponer una API mínima)
+
+```js
+// electron/preload.js
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  ping: () => ipcRenderer.invoke('ping'),
+});
+```
+
+- **Uso desde una Vista Backbone** (renderer)
+
+```js
+// src/ui/components/ElectronInfoView.js
+import Backbone from 'backbone';
+
+export default class ElectronInfoView extends Backbone.View {
+  get className() { return 'p-3'; }
+  events() { return { 'click [data-action="version"]': 'showVersion' }; }
+  render() {
+    this.$el.html('<button class="btn btn-outline-primary" data-action="version">Ver versión de la app</button>\n<div id="out" class="mt-2 text-muted"></div>');
+    return this;
+  }
+  async showVersion() {
+    if (!window.electronAPI) return;
+    const v = await window.electronAPI.getAppVersion();
+    this.$('#out').text(`Versión: ${v}`);
+  }
+}
+```
+
+- **Notas de seguridad**
+  - Mantén `contextIsolation: true`, `sandbox: true` y evita `nodeIntegration` en el renderizador.
+  - Exponer sólo lo necesario por `preload` usando `contextBridge`.
+  - Valida inputs y canales IPC; nombra canales con prefijos (p. ej. `app:*`).
+
+- **Build de producción**
+  - Ejecuta `npm run build` para generar `dist/` (renderer).
+  - Luego `npm run dist` empaqueta la app (ejemplo objetivo Linux AppImage). Ajusta targets según tu SO.
+  - En producción, `main.js` cargará `dist/index.html` automáticamente.
+
+  - Pantalla en blanco en prod: verifica ruta a `dist/index.html` y permisos del `files` en `electron-builder`.
+  - APIs no disponibles en el renderer: confirma que `preload.js` existe, la ruta es correcta y `contextIsolation` está activo.
+  - HMR no carga en dev: confirma `VITE_DEV_SERVER_URL` y que `wait-on tcp:5173` espera antes de lanzar Electron.
+
+#### Empaquetado con electron-builder
+
+- **Config en `package.json`** (sección `build`):
+
+```json
+{
+  "build": {
+    "appId": "com.ejemplo.backboneapp",
+    "directories": { "output": "release" },
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!**/*.map",
+      "!**/*.test.*",
+      "!tests/**"
+    ],
+    "extraMetadata": { "main": "electron/main.js" },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "icon": "build/icons/png"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  }
+}
+```
+
+- **Scripts por plataforma** (opcional):
+
+```json
+ {
+   "scripts": {
+     "dist": "npm run build && electron-builder -l",
+     "dist:linux": "npm run build && electron-builder -l AppImage deb",
+     "dist:win": "npm run build && electron-builder -w nsis",
+     "dist:mac": "npm run build && electron-builder -m dmg zip"
+   }
+}
+```
+
+- **Íconos**:
+  - macOS: `build/icon.icns`
+  - Windows: `build/icon.ico`
+  - Linux: carpeta `build/icons/png` con tamaños 256x256, 512x512, etc.
+
+- **Firma/Notarización (resumen)**:
+  - macOS: para distribuir fuera de desarrollo, configura certificados y `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD` si vas a notarizar.
+  - Windows: usa un certificado de firma de código (opcional) para evitar advertencias de SmartScreen.
+
+- **Ejecutar empaquetado**:
+  - Linux: `npm run dist:linux`
+  - Windows: `npm run dist:win`
+  - macOS: `npm run dist:mac`
+
+- **Notas**:
+  - Asegúrate de que el `main` en `extraMetadata` apunte a `electron/main.js` y que `preload.js` esté dentro de `files`.
+  - Si usas módulos nativos, necesitas toolchains de cada SO (Xcode en macOS; Build Tools en Windows).
+  - Los assets estáticos públicos deben quedar en `dist/` tras `vite build` (Vite copia automáticamente lo de `public/`).
 
 ### Optimización de imágenes (opcional)
 
@@ -606,21 +818,19 @@ import { defineConfig } from 'vite';
 import viteImagemin from 'vite-plugin-imagemin';
 
 export default defineConfig({
-	plugins: [
-		viteImagemin({
-			gifsicle: { optimizationLevel: 3 },
-			optipng: { optimizationLevel: 5 },
-			mozjpeg: { quality: 80 },
-			svgo: { plugins: [{ name: 'removeViewBox', active: false }] },
-		}),
-	],
+  plugins: [
+    viteImagemin({
+      gifsicle: { optimizationLevel: 3 },
+      optipng: { optimizationLevel: 5 },
+      mozjpeg: { quality: 80 },
+      svgo: { plugins: [{ name: 'removeViewBox', active: false }] },
+    }),
+  ],
 });
 ```
 
 Si prefieres, también puedes optimizar imágenes en una tarea separada o en tu pipeline de CI.
 Consulta también la guía de producción: Cap. 9, sección 1.1 “Optimización de imágenes (opcional)” para detalles de build, caché y CDN: [enlace](./Backbone-cap-09.md#cap9-imagenes).
-
----
 
 ### Estructura modular y plantillas
 
@@ -633,9 +843,9 @@ import Backbone from 'backbone';
 import tpl from '@/templates/view.tpl?raw';
 
 export default class MyView extends Backbone.View {
-	initialize() {
-		this.template = _.template(tpl);
-	}
+  initialize() {
+    this.template = _.template(tpl);
+  }
 }
 ```
 

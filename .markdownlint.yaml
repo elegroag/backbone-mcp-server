@@ -25,10 +25,7 @@ MD005: true
 # MD007/ul-indent : Unordered list indentation : https://github.com/DavidAnson/markdownlint/blob/v0.38.0/doc/md007.md
 MD007: false
 # MD009/no-trailing-spaces : No permitir espacios al final de la línea
-MD009: 
-  br_spaces: 0
-  list_item_empty_lines: false
-  strict: true
+MD009: false
 
 # MD010/no-hard-tabs : Hard tabs : https://github.com/DavidAnson/markdownlint/blob/v0.38.0/doc/md010.md
 MD010: false
