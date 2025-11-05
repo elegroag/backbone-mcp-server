@@ -2,6 +2,10 @@
 
 Servidor MCP (Model Context Protocol) que expone capítulos Markdown de Backbone.js como recursos legibles y añade una tool para búsqueda full‑text sobre dichos capítulos.
 
+<a href="https://glama.ai/mcp/servers/@elegroag/backbone-mcp-server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@elegroag/backbone-mcp-server/badge" alt="Backbone.js Documentation Server MCP server" />
+</a>
+
 ## Autoría
 
 - name: Edwin Andrés Legro Agudelo
