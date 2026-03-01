@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { listResources, readResource, searchResources } from './mcp-server.js';
+import { generateComponent, getAvailableComponentTypes } from './component-generator.js';
 import { z } from 'zod';
 
 const server = new McpServer({
@@ -99,6 +100,79 @@ server.registerTool(
         }
 
         return { content };
+    }
+);
+
+// Tool: crear componente desde template
+server.registerTool(
+    "create-component",
+    {
+        title: "Crear componente desde template",
+        description: "Crea un componente Backbone basado en una template disponible",
+        inputSchema: {
+            componentName: z.string().min(1).describe('Nombre del componente (ej: MyModel, UserController)'),
+            componentType: z.string().min(1).describe('Tipo de componente (ej: model, view, controller, collection, etc.)'),
+            outputPath: z.string().min(1).describe('Ruta donde guardar el componente (ej: src/models/MyModel.ts)'),
+        }
+    },
+    async (args) => {
+        try {
+            const componentName = args.componentName as string;
+            const componentType = args.componentType as string;
+            const outputPath = args.outputPath as string;
+
+            // Validar que el nombre del componente sea válido
+            if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(componentName)) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Error: El nombre del componente "${componentName}" no es válido. Debe empezar con letra, _ o $ y contener solo caracteres alfanuméricos, _ o $.`
+                        }
+                    ]
+                };
+            }
+
+            const result = await generateComponent({
+                componentName,
+                componentType,
+                outputPath
+            });
+
+            return {
+                content: [
+                    { type: "text", text: `✅ ${result}` }
+                ]
+            };
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            return {
+                content: [
+                    { type: "text", text: `❌ Error: ${errorMsg}` }
+                ]
+            };
+        }
+    }
+);
+
+// Tool: listar tipos de componentes disponibles
+server.registerTool(
+    "list-component-types",
+    {
+        title: "Listar tipos de componentes disponibles",
+        description: "Devuelve una lista de todos los tipos de componentes que pueden ser creados desde templates",
+        inputSchema: {}
+    },
+    async () => {
+        const types = getAvailableComponentTypes();
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Tipos de componentes disponibles:\n${types.map(t => `  • ${t}`).join('\n')}`
+                }
+            ]
+        };
     }
 );
 
