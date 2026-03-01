@@ -497,7 +497,7 @@ Para una contacts aplicación, la organización del código puede ser como se mu
 │  │  └─ restAdapter.js
 │  └─ utils/
 │     └─ templateLoader.js
-├─ Components/          # Componentes compartidos (navbar, diálogos, notificaciones)
+├─ components/          # Componentes compartidos (navbar, diálogos, notificaciones)
 │  ├─ dialogs/
 │  │  ├─ confirm.js
 │  │  └─ notify.js
